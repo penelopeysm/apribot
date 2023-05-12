@@ -1,0 +1,6 @@
+packages: .
+          
+source-repository-package
+    type: git
+    location: https://github.com/penelopeysm/reddit-oauth2
+    tag: 0bf29e0673d908aaa225a76d9cf393f37fd88439
