@@ -1,13 +1,15 @@
-# fly.toml app configuration file generated for ancient-fire-7168 on 2023-05-08T03:17:51+01:00
+# fly.toml app configuration file generated for apribot on 2023-05-13T18:20:59+01:00
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = "ancient-fire-7168"
+app = "apribot"
 primary_region = "lhr"
+
+[[mounts]]
+  source = "apribot_data"
+  destination = "/data"
 
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = false
-  auto_start_machines = false
