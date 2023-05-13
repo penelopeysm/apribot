@@ -11,6 +11,8 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
+import Database.SQLite.Simple
+import Paths_apribot (getDataFileName)
 import Reddit
 import System.Environment (getEnv)
 import System.IO (stderr)
@@ -30,9 +32,9 @@ hasWord p term =
 keywords :: [Text]
 keywords = ["apri", "dream", "beast", "safari", "sport", "fast", "friend", "heavy", "level", "love", "lure", "moon"]
 
--- | Post a comment about the post on a thread
-notify :: Post -> RedditT ()
-notify p = do
+-- | Process newly seen posts
+process :: Post -> RedditT ()
+process p = do
   let target = PostID "137us03"
   let body =
         printf
@@ -46,8 +48,28 @@ notify p = do
   if any (hasWord p) keywords
     then do
       addNewComment target (T.pack body)
+      liftIO $ addToDb p True
       liftIO $ T.putStrLn $ "Notifying about post " <> unPostID (postId p) <> "\n" <> postTitle p <> "\n" <> postUrl p <> "\n"
-    else liftIO $ T.putStrLn $ "Found non-matching post\n" <> postTitle p <> "\n" <> postUrl p <> "\n"
+    else do
+      liftIO $ T.putStrLn $ "Found non-matching post\n" <> postTitle p <> "\n" <> postUrl p <> "\n"
+      liftIO $ addToDb p False
+
+-- | Add a post to the SQLite database. The Bool parameter indicates whether it
+-- was a hit or not.
+addToDb :: Post -> Bool -> IO ()
+addToDb p isHit = do
+  sql <- getDataFileName "/data/test.db" >>= open
+  execute_ sql "CREATE TABLE IF NOT EXISTS posts (id TEXT PRIMARY KEY, url TEXT, title TEXT, submitter TEXT, isHit INTEGER)"
+  executeNamed
+    sql
+    "INSERT INTO posts (id, url, title, submitter, isHit) VALUES (:id, :url, :title, :submitter, :isHit)"
+    [ ":id" := unPostID (postId p),
+      ":url" := postUrl p,
+      ":title" := postTitle p,
+      ":submitter" := postAuthor p,
+      ":isHit" := (if isHit then 1 else 0 :: Integer)
+    ]
+  close sql
 
 main :: IO ()
 main = do
@@ -61,7 +83,7 @@ main = do
 
   let protected = do
         catch
-          (runRedditT' env $ postStream defaultStreamSettings (const notify) () "pokemontrades")
+          (runRedditT' env $ postStream defaultStreamSettings (const process) () "pokemontrades")
           ( \(e :: SomeException) -> do
               T.hPutStrLn stderr ("Exception: " <> T.pack (show e))
               threadDelay 5000000
