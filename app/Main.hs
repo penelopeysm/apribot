@@ -7,7 +7,6 @@ module Main where
 import Control.Concurrent (MVar, forkIO, newMVar, threadDelay, withMVar)
 import Control.Exception (SomeException, catch)
 import Control.Monad.IO.Class (liftIO)
-import Data.List (partition)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -90,12 +89,16 @@ addToDb post isHit = do
 makeHtml :: IO Html
 makeHtml = do
   sql <- getDataFileName "/data/test.db" >>= open
-  allPosts <- query_ sql "SELECT * FROM posts ORDER BY time DESC" :: IO [(Text, Text, Text, Text, Integer, Text, Text)]
+  hits <- query_ sql "SELECT id, url, title, submitter, time, flair FROM posts WHERE isHit = 1 ORDER BY time DESC LIMIT 50" :: IO [(Text, Text, Text, Text, Text, Text)]
+  nonhits <- query_ sql "SELECT id, url, title, submitter, time, flair FROM posts WHERE isHit = 0 ORDER BY time DESC LIMIT 50" :: IO [(Text, Text, Text, Text, Text, Text)]
+  -- Total number of rows
+  n <- fromOnly . Prelude.head <$> (query_ sql "SELECT COUNT(*) FROM posts;" :: IO [Only Int])
+  -- Total number of hits
+  m <- fromOnly . Prelude.head <$> (query_ sql "SELECT COUNT(*) FROM posts WHERE isHit = 1;" :: IO [Only Int])
   close sql
 
-  let (hits, nonhits) = partition (\(_, _, _, _, x, _, _) -> x == 1) allPosts
-  let mkTableRow :: (Text, Text, Text, Text, Integer, Text, Text) -> Html
-      mkTableRow (pid, purl, ptitle, psubmitter, _, ptime, pflair) =
+  let mkTableRow :: (Text, Text, Text, Text, Text, Text) -> Html
+      mkTableRow (pid, purl, ptitle, psubmitter, ptime, pflair) =
         H.tr $
           mapM_
             H.td
@@ -121,10 +124,8 @@ makeHtml = do
           H.a ! A.href "https://reddit.com/r/pokemontrades" $ "/r/pokemontrades"
           " subreddit and identifies potential Aprimon-related threads. "
           "It does so by scanning for certain keywords in either the post title or body. "
-          "This is admittedly not very sophisticated, and in the long term, it would be nice to have a better algorithm for this."
+          "This is admittedly not very sophisticated, and leads to quite a few false positives; in the long term, it would be nice to have a better algorithm for this."
         H.p $ do
-          let n = length allPosts
-          let m = length hits
           toHtml (printf "So far, ApriBot has seen a total of %d posts, " n :: String)
           toHtml (printf "of which %d were hits (%.2f%%)." m (100 * fromIntegral m / fromIntegral n :: Double) :: String)
           "This page shows you the most recent 50 hits and non-hits, ordered by most recent first."
