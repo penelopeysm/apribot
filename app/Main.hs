@@ -4,75 +4,164 @@
 
 module Main where
 
-import Control.Concurrent (threadDelay)
+import Control.Concurrent (MVar, forkIO, newMVar, threadDelay, withMVar)
 import Control.Exception (SomeException, catch)
 import Control.Monad.IO.Class (liftIO)
+import Data.List (partition)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
+import Data.Time.Format
 import Database.SQLite.Simple
 import Paths_apribot (getDataFileName)
 import Reddit
 import System.Environment (getEnv)
-import System.IO (stderr)
+import System.IO
+import Text.Blaze.Html.Renderer.Text (renderHtml)
+import Text.Blaze.Html5 as H
+import qualified Text.Blaze.Html5.Attributes as A
 import Text.Printf (printf)
+import qualified Web.Scotty as Scotty
 
 getEnvAsText :: Text -> IO Text
 getEnvAsText = fmap T.pack . getEnv . T.unpack
 
+atomically :: MVar () -> IO () -> IO ()
+atomically lock action = withMVar lock $ const action
+
 -- | Very basic check on whether a string is found in either the
 -- post title or the post body.
 hasWord :: Post -> Text -> Bool
-hasWord p term =
-  term `T.isInfixOf` T.toCaseFold (postTitle p)
-    || term `T.isInfixOf` T.toCaseFold (postBody p)
+hasWord post term =
+  term `T.isInfixOf` T.toCaseFold (postTitle post)
+    || term `T.isInfixOf` T.toCaseFold (postBody post)
 
 -- | Keywords triggering post reporting
 keywords :: [Text]
 keywords = ["apri", "dream", "beast", "safari", "sport", "fast", "friend", "heavy", "level", "love", "lure", "moon"]
 
 -- | Process newly seen posts
-process :: Post -> RedditT ()
-process p = do
+process :: MVar () -> Post -> RedditT (MVar ())
+process lock post = do
   let target = PostID "137us03"
-  let body =
+  let postBody =
         printf
           "**Title:** [%s](%s)\n\n**Poster:** [\\/u\\/%s](https://reddit.com/user/%s)\n\n**Tag:** %s\n\n**Posted at:** %s"
-          (postTitle p)
-          (postUrl p)
-          (postAuthor p)
-          (postAuthor p)
-          (fromMaybe "None" (postFlairText p))
-          (show $ postCreatedTime p)
-  if any (hasWord p) keywords
+          (postTitle post)
+          (postUrl post)
+          (postAuthor post)
+          (postAuthor post)
+          (fromMaybe "None" (postFlairText post))
+          (show $ postCreatedTime post)
+  if any (hasWord post) keywords
     then do
-      addNewComment target (T.pack body)
-      liftIO $ addToDb p True
-      liftIO $ T.putStrLn $ "Notifying about post " <> unPostID (postId p) <> "\n" <> postTitle p <> "\n" <> postUrl p <> "\n"
+      addNewComment target (T.pack postBody)
+      liftIO $ addToDb post True
+      liftIO $ atomically lock $ T.putStrLn $ "Notifying about post " <> unPostID (postId post) <> "\n" <> postTitle post <> "\n" <> postUrl post <> "\n"
     else do
-      liftIO $ T.putStrLn $ "Found non-matching post\n" <> postTitle p <> "\n" <> postUrl p <> "\n"
-      liftIO $ addToDb p False
+      liftIO $ atomically lock $ T.putStrLn $ "Found non-matching post\n" <> postTitle post <> "\n" <> postUrl post <> "\n"
+      liftIO $ addToDb post False
+  pure lock
 
 -- | Add a post to the SQLite database. The Bool parameter indicates whether it
 -- was a hit or not.
 addToDb :: Post -> Bool -> IO ()
-addToDb p isHit = do
+addToDb post isHit = do
   sql <- getDataFileName "/data/test.db" >>= open
-  execute_ sql "CREATE TABLE IF NOT EXISTS posts (id TEXT PRIMARY KEY, url TEXT, title TEXT, submitter TEXT, isHit INTEGER)"
+  execute_ sql "CREATE TABLE IF NOT EXISTS posts (id TEXT PRIMARY KEY, url TEXT, title TEXT, submitter TEXT, isHit INTEGER, time TEXT, flair TEXT)"
   executeNamed
     sql
-    "INSERT INTO posts (id, url, title, submitter, isHit) VALUES (:id, :url, :title, :submitter, :isHit)"
-    [ ":id" := unPostID (postId p),
-      ":url" := postUrl p,
-      ":title" := postTitle p,
-      ":submitter" := postAuthor p,
-      ":isHit" := (if isHit then 1 else 0 :: Integer)
+    "INSERT INTO posts (id, url, title, submitter, isHit, time) VALUES (:id, :url, :title, :submitter, :isHit, :time, :flair)"
+    [ ":id" := unPostID (postId post),
+      ":url" := postUrl post,
+      ":title" := postTitle post,
+      ":submitter" := postAuthor post,
+      ":isHit" := (if isHit then 1 else 0 :: Integer),
+      ":time" := formatTime defaultTimeLocale "%F %T" (postCreatedTime post),
+      ":flair" := fromMaybe "" (postFlairText post)
     ]
   close sql
 
-main :: IO ()
-main = do
+-- | Generate HTML from the SQLite database
+makeHtml :: IO Html
+makeHtml = do
+  sql <- getDataFileName "/data/test.db" >>= open
+  allPosts <- query_ sql "SELECT * FROM posts ORDER BY time DESC" :: IO [(Text, Text, Text, Text, Integer, Text, Text)]
+  close sql
+
+  let (hits, nonhits) = partition (\(_, _, _, _, x, _, _) -> x == 1) allPosts
+  let mkTableRow :: (Text, Text, Text, Text, Integer, Text, Text) -> Html
+      mkTableRow (pid, purl, ptitle, psubmitter, _, ptime, pflair) =
+        H.tr $
+          mapM_
+            H.td
+            [ H.code (toHtml pid),
+              toHtml ptime,
+              toHtml ("/u/" <> psubmitter),
+              toHtml pflair,
+              a ! A.href (textValue purl) $ toHtml ptitle
+            ]
+      tableHeader :: Html
+      tableHeader =
+        H.tr $ mapM_ (H.th . toHtml) ["Post ID" :: Text, "Time (UTC)", "Submitter", "Flair", "Title"]
+
+  pure $ docTypeHtml $ do
+    H.head $ do
+      H.title "ApriBot"
+      H.link ! A.rel "stylesheet" ! A.href "static/styles.css"
+    H.body $ H.main $ do
+      H.h1 "ApriBot"
+      H.div ! A.class_ "prose" $ do
+        H.p $ do
+          "ApriBot monitors new posts on the "
+          H.a ! A.href "https://reddit.com/r/pokemontrades" $ "/r/pokemontrades"
+          " subreddit and identifies potential Aprimon-related threads. "
+          "It does so by scanning for certain keywords in either the post title or body. "
+          "This is admittedly not very sophisticated, and in the long term, it would be nice to have a better algorithm for this."
+        H.p $ do
+          let n = length allPosts
+          let m = length hits
+          toHtml (printf "So far, ApriBot has seen a total of %d posts, " n :: String)
+          toHtml (printf "of which %d were hits (%.2f%%)." m (100 * fromIntegral m / fromIntegral n :: Double) :: String)
+          "This page shows you the most recent 50 hits and non-hits, ordered by most recent first."
+        H.p $ do
+          "If you have any questions about ApriBot, feel free to get in touch with "
+          H.a ! A.href "https://reddit.com/u/is_a_togekiss" $ "/u/is_a_togekiss"
+          "; she doesn’t have DMs enabled, so just comment on any of her posts."
+        H.p $ do
+          "ApriBot is implemented with Haskell and SQLite. If you’re interested, its source code is on "
+          H.a ! A.href "https://github.com/penelopeysm/apribot" $ "GitHub"
+          "."
+      H.h2 "Hits"
+      if null hits
+        then H.p "None so far!"
+        else H.table $ do
+          tableHeader
+          mapM_ mkTableRow (take 50 hits)
+      H.h2 "Non-hits"
+      if null nonhits
+        then H.p "None so far!"
+        else H.table $ do
+          tableHeader
+          mapM_ mkTableRow (take 50 nonhits)
+
+-- | Thread for the web server
+web :: MVar () -> IO ()
+web lock = do
+  css <- getDataFileName "static/styles.css"
+  atomically lock $ T.putStrLn "Launching web server on port 8080..."
+  Scotty.scotty 8080 $ do
+    Scotty.get "/" $ do
+      liftIO makeHtml >>= Scotty.html . renderHtml
+    Scotty.get "/static/styles.css" $ do
+      Scotty.setHeader "Content-Type" "text/css"
+      Scotty.file css
+
+-- | Thread to stream Reddit posts and process them
+bot :: MVar () -> IO ()
+bot lock = do
+  atomically lock $ T.putStrLn "Starting Reddit bot..."
   credsUsername <- getEnvAsText "REDDIT_USERNAME"
   credsPassword <- getEnvAsText "REDDIT_PASSWORD"
   credsClientId <- getEnvAsText "REDDIT_ID"
@@ -80,13 +169,19 @@ main = do
   let userAgent = "github:penelopeysm/apribot by /u/is_a_togekiss"
   let creds = Credentials {..}
   env <- authenticate creds userAgent
-
   let protected = do
         catch
-          (runRedditT' env $ postStream defaultStreamSettings (const process) () "pokemontrades")
+          (runRedditT' env $ postStream defaultStreamSettings process lock "pokemontrades")
           ( \(e :: SomeException) -> do
-              T.hPutStrLn stderr ("Exception: " <> T.pack (show e))
+              atomically lock $ T.hPutStrLn stderr ("Exception: " <> T.pack (show e))
               threadDelay 5000000
               protected
           )
   protected
+
+main :: IO ()
+main = do
+  hSetBuffering stdout NoBuffering
+  lock <- newMVar ()
+  _ <- forkIO $ web lock
+  bot lock

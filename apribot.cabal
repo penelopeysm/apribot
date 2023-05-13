@@ -66,12 +66,16 @@ executable apribot
 
     -- Data files, see https://cabal.readthedocs.io/en/3.4/cabal-package.html#accessing-data-files-from-package-code
     data-files:       data/test.db
+                      static/styles.css
 
     -- Other library packages from which modules are imported.
     build-depends:    base ^>=4.17.0.0,
                       text,
                       reddit-oauth2,
-                      sqlite-simple
+                      sqlite-simple,
+                      scotty,
+                      blaze-html,
+                      time
 
     -- Directories containing source files.
     hs-source-dirs:   app
