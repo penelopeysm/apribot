@@ -41,16 +41,19 @@ hasWord post term =
 keywords :: [Text]
 keywords = ["apri", "dream", "beast", "safari", "sport", "fast", "friend", "heavy", "level", "love", "lure", "moon"]
 
+markdownEscape :: Text -> Text
+markdownEscape = T.replace "_" "\\_"
+
 -- | Process newly seen posts
 process :: MVar () -> Post -> RedditT (MVar ())
 process lock post = do
-  let target = PostID "137us03"
+  let target = PostID "13fzjhf"
   let postBody =
         printf
           "**Title:** [%s](%s)\n\n**Poster:** [\\/u\\/%s](https://reddit.com/user/%s)\n\n**Tag:** %s\n\n**Posted at:** %s"
           (postTitle post)
           (postUrl post)
-          (postAuthor post)
+          (markdownEscape $ postAuthor post)
           (postAuthor post)
           (fromMaybe "None" (postFlairText post))
           (show $ postCreatedTime post)
@@ -72,7 +75,7 @@ addToDb post isHit = do
   execute_ sql "CREATE TABLE IF NOT EXISTS posts (id TEXT PRIMARY KEY, url TEXT, title TEXT, submitter TEXT, isHit INTEGER, time TEXT, flair TEXT)"
   executeNamed
     sql
-    "INSERT INTO posts (id, url, title, submitter, isHit, time) VALUES (:id, :url, :title, :submitter, :isHit, :time, :flair)"
+    "INSERT INTO posts (id, url, title, submitter, isHit, time, flair) VALUES (:id, :url, :title, :submitter, :isHit, :time, :flair)"
     [ ":id" := unPostID (postId post),
       ":url" := postUrl post,
       ":title" := postTitle post,
