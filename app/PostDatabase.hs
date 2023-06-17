@@ -15,12 +15,14 @@
 --                   interesting.
 --    - disagree   : Comma-separated list of people who think the post is
 --                   NOT interesting.
-module PostDatabase (addToDb) where
+module PostDatabase (addToDb, getLatestHits, getLatestNonHits, getTotalRows, getTotalHits) where
 
 import Config
 import Control.Monad (forM_)
 import Control.Monad.IO.Class (liftIO)
 import Data.Maybe (fromMaybe)
+import Data.Text (Text)
+import qualified Data.Text as T
 import Data.Time.Format
 import Database.SQLite.Simple
 import Paths_apribot (getDataFileName)
@@ -49,6 +51,24 @@ addToDb post hit = do
   n <- fromOnly . Prelude.head <$> (query_ sql "SELECT COUNT(*) FROM posts;" :: IO [Only Int])
   close sql
   printf "Added post to database (%d total posts)\n" n
+
+getLatestHits :: Int -> Connection -> IO [(Text, Text, Text, Text, Text, Text)]
+getLatestHits n conn =
+  query_ conn (Query . T.pack $ (printf "SELECT id, url, title, submitter, time, flair FROM posts WHERE hit = 1 ORDER BY time DESC LIMIT %d" n :: String))
+
+getLatestNonHits :: Int -> Connection -> IO [(Text, Text, Text, Text, Text, Text)]
+getLatestNonHits n conn =
+  query_ conn (Query . T.pack $ (printf "SELECT id, url, title, submitter, time, flair FROM posts WHERE hit = 0 ORDER BY time DESC LIMIT %d" n :: String))
+
+getTotalRows :: Connection -> IO Int
+getTotalRows conn =
+  fromOnly . Prelude.head
+    <$> query_ conn "SELECT COUNT(*) FROM posts WHERE hit = 1 or hit = 0;"
+
+getTotalHits :: Connection -> IO Int
+getTotalHits conn =
+  fromOnly . Prelude.head
+    <$> query_ conn "SELECT COUNT(*) FROM posts WHERE hit = 1;"
 
 -- | Set up the database from scratch. Do not use this unless you want to start
 -- all over again...!

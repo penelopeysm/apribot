@@ -76,7 +76,7 @@ executable apribot
                       reddit-oauth2,
                       sqlite-simple,
                       scotty,
-                      blaze-html,
+                      lucid,
                       time
 
     -- Directories containing source files.
