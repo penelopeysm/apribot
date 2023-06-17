@@ -15,7 +15,7 @@
 --                   interesting.
 --    - disagree   : Comma-separated list of people who think the post is
 --                   NOT interesting.
-module PostDatabase (addToDb, getLatestHits, getLatestNonHits, getTotalRows, getTotalHits) where
+module Database (addToDb, getLatestHits, getLatestNonHits, getTotalRows, getTotalHits) where
 
 import Config
 import Control.Monad (forM_)
@@ -90,11 +90,11 @@ _populateDB = do
     \ truth INTEGER, \
     \ agree TEXT NOT NULL, \
     \ disagree TEXT NOT NULL);"
-  credsUsername <- getEnvAsText "REDDIT_USERNAME"
-  credsPassword <- getEnvAsText "REDDIT_PASSWORD"
-  credsClientId <- getEnvAsText "REDDIT_ID"
-  credsClientSecret <- getEnvAsText "REDDIT_SECRET"
-  let creds = Credentials {..}
+  ownerUsername <- getEnvAsText "REDDIT_USERNAME"
+  ownerPassword <- getEnvAsText "REDDIT_PASSWORD"
+  ownerClientId <- getEnvAsText "REDDIT_FE_ID"
+  ownerClientSecret <- getEnvAsText "REDDIT_FE_SECRET"
+  let creds = OwnerCredentials {..}
   env <- authenticate creds (userAgent config)
 
   runRedditT' env $ do

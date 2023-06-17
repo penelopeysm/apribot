@@ -1,7 +1,8 @@
 module Config (Config (..), config) where
 
-import Data.Text (Text)
+import Data.Text (Text, pack)
 import Reddit
+import Text.Printf (printf)
 
 data Config = Config
   { dbFileName :: String,
@@ -9,8 +10,12 @@ data Config = Config
     notifyOnPostId :: ID Post,
     port :: Int,
     keywords :: [Text],
-    userAgent :: Text
+    userAgent :: Text,
+    redirectUri :: Text
   }
+
+thePort :: Int
+thePort = 8080
 
 -- | App configuration.
 config :: Config
@@ -19,7 +24,8 @@ config =
     { dbFileName = "/data/posts.db",
       watchedSubreddit = "pokemontrades",
       notifyOnPostId = PostID "13fzjhf",
-      port = 8080,
+      port = thePort,
       keywords = ["apri", "dream", "beast", "safari", "sport", "fast", "friend", "heavy", "level", "love", "lure", "moon"],
-      userAgent = "github:penelopeysm/apribot by /u/is_a_togekiss"
+      userAgent = "github:penelopeysm/apribot by /u/is_a_togekiss",
+      redirectUri = pack $ printf "http://localhost:%d/authorised" thePort
     }

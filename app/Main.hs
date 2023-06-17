@@ -8,7 +8,7 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
-import PostDatabase
+import Database
 import Reddit
 import System.IO
 import Text.Printf (printf)
@@ -55,21 +55,21 @@ process lock post = do
 bot :: MVar () -> IO ()
 bot lock = do
   atomically lock $ T.putStrLn "Starting Reddit bot..."
-  credsUsername <- getEnvAsText "REDDIT_USERNAME"
-  credsPassword <- getEnvAsText "REDDIT_PASSWORD"
-  credsClientId <- getEnvAsText "REDDIT_ID"
-  credsClientSecret <- getEnvAsText "REDDIT_SECRET"
-  let creds = Credentials {..}
+  ownerUsername <- getEnvAsText "REDDIT_USERNAME"
+  ownerPassword <- getEnvAsText "REDDIT_PASSWORD"
+  ownerClientId <- getEnvAsText "REDDIT_ID"
+  ownerClientSecret <- getEnvAsText "REDDIT_SECRET"
+  let creds = OwnerCredentials {..}
   env <- authenticate creds (userAgent config)
-  let protected = do
+  let loop = do
         catch
           (runRedditT' env $ postStream defaultStreamSettings process lock (watchedSubreddit config))
           ( \(e :: SomeException) -> do
               atomically lock $ T.hPutStrLn stderr ("Exception: " <> T.pack (show e))
               threadDelay 5000000
-              protected
+              loop
           )
-  protected
+  loop
 
 -- | Entry point
 main :: IO ()

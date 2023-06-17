@@ -1,9 +1,10 @@
-module Utils (atomically, getEnvAsText, markdownEscape) where
+module Utils (atomically, getEnvAsText, markdownEscape, randomText) where
 
 import Control.Concurrent (MVar, withMVar)
 import Data.Text (Text)
 import qualified Data.Text as T
 import System.Environment (getEnv)
+import System.Random
 
 atomically :: MVar () -> IO () -> IO ()
 atomically lock action = withMVar lock $ const action
@@ -17,3 +18,10 @@ getEnvAsText = fmap T.pack . getEnv . T.unpack
 -- meaning in Markdown.
 markdownEscape :: Text -> Text
 markdownEscape = T.replace "_" "\\_"
+
+chars :: String
+chars = ['a' .. 'z'] ++ ['A' .. 'Z'] ++ ['0' .. '9']
+
+randomText :: Int -> IO Text
+randomText len = do
+  T.pack . map (chars !!) . take len . randomRs (0, length chars - 1) <$> initStdGen
