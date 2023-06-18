@@ -41,3 +41,8 @@ code {
     font-family: 'Fira Code', monospace;
     font-size: 13px;
 }
+
+.centred {
+  display: flex;
+  justify-content: center;
+}

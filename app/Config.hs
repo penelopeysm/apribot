@@ -1,6 +1,7 @@
 module Config (Config (..), config) where
 
-import Data.Text (Text, pack)
+import Data.Text (Text)
+import qualified Data.Text as T
 import Reddit
 import Text.Printf (printf)
 
@@ -27,5 +28,6 @@ config =
       port = thePort,
       keywords = ["apri", "dream", "beast", "safari", "sport", "fast", "friend", "heavy", "level", "love", "lure", "moon"],
       userAgent = "github:penelopeysm/apribot by /u/is_a_togekiss",
-      redirectUri = pack $ printf "http://localhost:%d/authorised" thePort
+      -- redirectUri = "https://apribot.fly.dev/authorised"
+      redirectUri = T.pack (printf "http://localhost:%d/authorised" thePort)
     }

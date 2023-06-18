@@ -3,6 +3,7 @@ module Web (web) where
 import Config
 import Control.Applicative (liftA2)
 import Control.Concurrent (MVar)
+import Control.Exception (SomeException, try)
 import Control.Monad.IO.Class (liftIO)
 import Data.IORef
 import qualified Data.Map as M
@@ -43,8 +44,8 @@ removeFromTokenDb userSessionId dbRef = do
 
 -- * Generating RedditEnv values to use
 
--- | Retrieve authentication code from cookie, and thus the token from the
--- database, if the user has one.
+-- | Retrieve token-identifier cookie, and thus the token from the database, if
+-- the user has one.
 retrieveRedditEnv :: IORef Database -> S.ActionM (Maybe RedditEnv)
 retrieveRedditEnv dbRef = do
   db <- liftIO $ readIORef dbRef
@@ -94,6 +95,18 @@ makeNewRedditEnv clientId clientSecret redirectUri dbRef = do
     _ -> do
       S.redirect "auth_error"
 
+-- | Deletes all cookies and the corresponding token from the database (if it
+-- exists)
+cleanup :: IORef Database -> S.ActionM ()
+cleanup dbRef = do
+  maybeCookie <- SC.getCookie tokenCookieName
+  case maybeCookie of
+    Just cookie -> do
+      liftIO $ removeFromTokenDb cookie dbRef
+      SC.deleteCookie tokenCookieName
+      SC.deleteCookie hashedStateCookieName
+    Nothing -> pure ()
+
 -- * HTML helpers
 
 tableHeaderSql :: Html ()
@@ -118,6 +131,20 @@ headHtml titleExtra = do
   head_ $ do
     title_ $ toHtml (maybe "ApriBot" ("ApriBot :: " <>) titleExtra)
     link_ [rel_ "stylesheet", href_ "static/styles.css"]
+
+-- | Error HTML
+errorHtml :: SomeException -> Html ()
+errorHtml e = do
+  headHtml (Just "Error")
+  body_ $ do
+    h1_ "An error occurred :("
+    p_ $ do
+      "Please report this to me, either via "
+      a_ [href_ "https://github.com/penelopeysm/apribot"] "GitHub"
+      " or "
+      a_ [href_ "https://reddit.com/u/is_a_togekiss"] "Reddit"
+      "."
+    p_ $ code_ $ toHtml $ show e
 
 -- * HTML that is actually served
 
@@ -202,14 +229,22 @@ web lock = do
             "This might be because you denied ApriBot access, or you took too long to log in (you have to do so within 10 minutes of opening the page)."
           p_ $ a_ [href_ "/contribute"] "Please try again, and let me know if it still doesn't work."
 
+    S.get "/contrib_error" $ do
+      S.html $ renderText $ html_ $ do
+        headHtml (Just "Error")
+        body_ $ main_ $ do
+          h1_ "Form submission error :("
+          p_ $ do
+            "Sorry! There was an error recording your vote. "
+          p_ $ a_ [href_ "/contribute"] "Please try again, and let me know if it still doesn't work."
+
     S.get "/logout" $ do
       -- Remove token from database
       maybeCookie <- SC.getCookie tokenCookieName
       case maybeCookie of
         Nothing -> S.redirect "/"
-        Just cookie -> do
-          liftIO $ removeFromTokenDb cookie dbRef
-          SC.deleteCookie tokenCookieName
+        Just _ -> do
+          cleanup dbRef
           S.html $ renderText $ html_ $ do
             headHtml (Just "Logged out")
             body_ $ main_ $ do
@@ -221,6 +256,22 @@ web lock = do
                 ", or the "
                 a_ [href_ "/contribute"] "contribute page"
                 "."
+
+    S.post "/contribute" $ do
+      mPostId :: Maybe Text <- (Just <$> S.param "id") `S.rescue` const (pure Nothing)
+      mVoter :: Maybe Text <- (Just <$> S.param "username") `S.rescue` const (pure Nothing)
+      mVote :: Maybe Int <- (Just <$> S.param "vote") `S.rescue` const (pure Nothing)
+      case (mPostId, mVoter, mVote) of
+        (Just postId, Just voter, Just vote) -> do
+          liftIO $ atomically lock $ do
+            putStrLn $ printf "Received vote from /u/%s on post %s: %d" voter postId vote
+            sql <- getDataFileName (dbFileName config) >>= open
+            addVote postId voter vote sql
+            n <- getNumVotes sql
+            close sql
+            putStrLn $ printf "Total number of votes: %d" n
+          S.redirect "/contribute"
+        _ -> S.redirect "/contrib_error"
 
     S.get "/contribute" $ do
       maybeEnv <- retrieveRedditEnv dbRef
@@ -249,6 +300,7 @@ web lock = do
                       authUrlDuration = Temporary,
                       authUrlScopes = Set.singleton ScopeIdentity
                     }
+
           S.html $ renderText $ html_ $ do
             headHtml (Just "Contributing")
             body_ $ main_ $ do
@@ -269,41 +321,59 @@ web lock = do
               p_ $ do
                 "The permissions I am requesting do not give me access any of your personal information, apart from your Reddit username and the time you created your account. "
                 "I only need this to make sure that you don't label the same post multiple times."
+
         -- User is logged in
         Just env -> do
-          username <- liftIO $ runRedditT' env (accountUsername <$> myAccount)
-          sql <- liftIO $ getDataFileName (dbFileName config) >>= open
-          nl <- liftIO $ getNumberLabelled username sql
-          next <- liftIO $ getNextUnlabelledPost sql
-          liftIO $ close sql
-          S.html $ renderText $ html_ $ do
-            headHtml (Just "Contributing")
-            body_ $ main_ $ do
-              h1_ "Contribute"
-              p_ $ do
-                "("
-                i_ $ a_ [href_ "/"] "back to home page"
-                " — "
-                i_ $ a_ [href_ "/logout"] "logout"
-                ")"
-              p_ $ do
-                span_ $ b_ $ do
-                  "You are now logged in as: /u/"
-                  toHtml username
-                  "."
-                " You have labelled a total of "
-                toHtml $ show nl
-                " post"
-                toHtml $ if nl == 1 then "." else "s." :: Text
-                toHtml $ if nl > 0 then "Thank you so much! <3" else "" :: Text
-                case next of
-                     -- This is very optimistic...
-                     Nothing -> do
-                       p_ "There are no more unlabelled posts. Please check back again tomorrow!"
-                     Just (postId, postUrl) -> do
-                       p_ $ do
-                         "Post ID: "
-                         toHtml postId
-                        -- TODO: Fix this. Reddit doesn't allow its content to
-                        -- be embedded in iframes.
-                       iframe_ [src_ postUrl, width_ "100%", height_ "500px"] ""
+          usernameEither <- liftIO $ try $ runRedditT' env (accountUsername <$> myAccount)
+          case usernameEither of
+            Left e -> do
+              cleanup dbRef
+              S.html $ renderText $ errorHtml e
+            Right username -> do
+              -- Get data from database
+              sql <- liftIO $ getDataFileName (dbFileName config) >>= open
+              nl <- liftIO $ getNumberLabelled username sql
+              next <- liftIO $ getNextUnlabelledPost sql
+              liftIO $ close sql
+
+              -- Serve HTML
+              S.html $ renderText $ html_ $ do
+                headHtml (Just "Contributing")
+                body_ $ main_ $ do
+                  h1_ "Contribute"
+                  p_ $ i_ $ do
+                    "("
+                    a_ [href_ "/"] "back to home page"
+                    " — "
+                    a_ [href_ "/logout"] "logout"
+                    ")"
+                  p_ $ do
+                    span_ $ b_ $ do
+                      "You are now logged in as: /u/"
+                      toHtml username
+                      "."
+                    " You have labelled a total of "
+                    toHtml $ show nl
+                    " post"
+                    toHtml $ if nl == 1 then "." else "s." :: Text
+                    toHtml $ if nl > 0 then " Thank you so much! <3" else "" :: Text
+                    hr_ []
+                    case next of
+                      -- This is very optimistic...
+                      Nothing -> do
+                        p_ "There are no more unlabelled posts. Please check back again tomorrow!"
+                      Just (postId, postUrl, postTitle, postBody, postSubmitter, postTime) -> do
+                        div_ [class_ "centred"] $ do
+                          div_ $ do
+                            form_ [action_ "/contribute", method_ "post"] $ do
+                              span_ $ b_ "Is this Aprimon-related?"
+                              input_ [type_ "hidden", name_ "id", value_ postId]
+                              input_ [type_ "hidden", name_ "username", value_ username]
+                              button_ [type_ "submit", name_ "vote", value_ "1"] "Yes"
+                              button_ [type_ "submit", name_ "vote", value_ "0"] "No"
+                        h3_ $ toHtml postTitle
+                        ul_ $ do
+                          li_ $ toHtml (printf "Submitted by /u/%s at %s UTC" postSubmitter postTime :: String)
+                          li_ $ do
+                            a_ [href_ postUrl] "Link to original Reddit post"
+                        p_ $ toHtml postBody

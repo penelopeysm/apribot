@@ -26,6 +26,8 @@ module Database
     getTotalHits,
     getNumberLabelled,
     getNextUnlabelledPost,
+    addVote,
+    getNumVotes,
   )
 where
 
@@ -87,15 +89,32 @@ getNumberLabelled username conn =
   fromOnly . head
     <$> query_ conn (Query . T.pack $ printf "SELECT COUNT(*) FROM votes WHERE username = '%s';" username)
 
-getNextUnlabelledPost :: Connection -> IO (Maybe (Text, Text))
+-- | Returns post ID, URL, title, body, submitter, time
+getNextUnlabelledPost :: Connection -> IO (Maybe (Text, Text, Text, Text, Text, Text))
 getNextUnlabelledPost conn = do
-  unlabelled :: [(Text, Text)] <-
+  unlabelled <-
     query_
       conn
-      "SELECT id, url FROM posts WHERE id NOT IN (SELECT id FROM votes) AND truth IS NULL ORDER BY RANDOM() LIMIT 1"
+      "SELECT id, url, title, body, submitter, time FROM posts WHERE id NOT IN (SELECT id FROM votes) AND truth IS NULL ORDER BY RANDOM() LIMIT 1"
   case unlabelled of
     [] -> pure Nothing
     (p : _) -> pure (Just p)
+
+-- | Record a user's vote on a post
+addVote :: Text -> Text -> Int -> Connection -> IO ()
+addVote postId voter vote conn = do
+  executeNamed
+    conn
+    "INSERT INTO votes (id, username, vote) VALUES (:id, :username, :vote)"
+    [ ":id" := postId,
+      ":username" := voter,
+      ":vote" := vote
+    ]
+
+getNumVotes :: Connection -> IO Int
+getNumVotes conn =
+  fromOnly . head
+    <$> query_ conn "SELECT COUNT(*) FROM votes;"
 
 -- | Set up the database from scratch. Do not use this unless you want to start
 -- all over again...!
