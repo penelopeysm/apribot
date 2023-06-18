@@ -90,6 +90,7 @@ makeNewRedditEnv clientId clientSecret redirectUri dbRef = do
         sessionCookie
           { C.setCookieExpires = Just (tokenExpiresAt t),
             C.setCookieHttpOnly = True,
+            C.setCookieSameSite = Just C.sameSiteLax,
             C.setCookieSecure = True
           }
       -- Store the token in the 'database' using this session ID
@@ -133,6 +134,10 @@ headHtml titleExtra = do
   head_ $ do
     title_ $ toHtml (maybe "ApriBot" ("ApriBot :: " <>) titleExtra)
     link_ [rel_ "stylesheet", href_ "static/styles.css"]
+    link_ [rel_ "apple-touch-icon", sizes_ "180x180", href_ "static/apple-touch-icon.png"]
+    link_ [rel_ "icon", type_ "image/png", sizes_ "32x32", href_ "static/favicon-32x32.png"]
+    link_ [rel_ "icon", type_ "image/png", sizes_ "16x16", href_ "static/favicon-16x16.png"]
+    link_ [rel_ "manifest", href_ "static/site.webmanifest"]
 
 -- | Error HTML
 errorHtml :: SomeException -> Html ()
@@ -310,7 +315,7 @@ web :: MVar () -> IO ()
 web lock = do
   clientId <- getEnvAsText "REDDIT_FE_ID"
   clientSecret <- getEnvAsText "REDDIT_FE_SECRET"
-  css <- getDataFileName "static/styles.css"
+  staticDir <- getDataFileName "static"
   dbRef <- newIORef M.empty
   atomically lock $ printf "Launching web server on port %d...\n" (port config)
 
@@ -320,7 +325,35 @@ web lock = do
 
     S.get "/static/styles.css" $ do
       S.setHeader "Content-Type" "text/css"
-      S.file css
+      S.file (staticDir <> "/" <> "styles.css")
+
+    S.get "/static/site.webmanifest" $ do
+      S.setHeader "Content-Type" "application/manifest+json"
+      S.file (staticDir <> "/" <> "site.webmanifest")
+
+    S.get "/static/favicon.ico" $ do
+      S.setHeader "Content-Type" "image/x-icon"
+      S.file (staticDir <> "/" <> "favicon.ico")
+
+    S.get "/static/favicon-16x16.png" $ do
+      S.setHeader "Content-Type" "image/x-png"
+      S.file (staticDir <> "/" <> "favicon-16x16.png")
+
+    S.get "/static/favicon-32x32.png" $ do
+      S.setHeader "Content-Type" "image/x-png"
+      S.file (staticDir <> "/" <> "favicon-32x32.png")
+
+    S.get "/static/apple-touch-icon.png" $ do
+      S.setHeader "Content-Type" "image/x-png"
+      S.file (staticDir <> "/" <> "apple-touch-icon.png")
+
+    S.get "/static/android-chrome-192x192.png" $ do
+      S.setHeader "Content-Type" "image/x-png"
+      S.file (staticDir <> "/" <> "android-chrome-192x192.png")
+
+    S.get "/static/android-chrome-512x512.png" $ do
+      S.setHeader "Content-Type" "image/x-png"
+      S.file (staticDir <> "/" <> "android-chrome-512x512.png")
 
     S.get "/authorised" $ do
       makeNewRedditEnv clientId clientSecret (redirectUri config) dbRef
@@ -369,9 +402,8 @@ web lock = do
           SC.setCookie $
             stateCookie
               { C.setCookieHttpOnly = True,
-                -- Secure works with localhost over HTTP in Firefox and Chrome
                 C.setCookieSecure = True,
-                -- Surely 10 minutes is enough for the user to log in
+                C.setCookieSameSite = Just C.sameSiteLax,
                 C.setCookieMaxAge = Just (secondsToDiffTime 600)
               }
           S.html $ renderText $ html_ $ do
