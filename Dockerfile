@@ -1,4 +1,4 @@
-FROM haskell:9.4.5-buster
+FROM penelopeysm/apribot-dependencies:0.1
 WORKDIR /
 COPY . .
 
