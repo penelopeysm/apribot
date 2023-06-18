@@ -5,15 +5,15 @@ import Control.Applicative (liftA2)
 import Control.Concurrent (MVar)
 import Control.Monad.IO.Class (liftIO)
 import Data.IORef
-import qualified Data.List as List
+import qualified Data.Map as M
 import Data.Password.Bcrypt
 import qualified Data.Set as Set
 import Data.Text (Text)
-import Data.Time.Clock (UTCTime (..), secondsToDiffTime)
+import Data.Time.Clock (secondsToDiffTime)
+import Database
 import Database.SQLite.Simple
 import Lucid
 import Paths_apribot (getDataFileName)
-import Database
 import Reddit
 import Reddit.Auth (Token (..))
 import Text.Printf (printf)
@@ -28,15 +28,20 @@ hashedStateCookieName = "apribotOauth2State"
 tokenCookieName :: Text
 tokenCookieName = "apribotToken"
 
--- TODO: Deal with tokens which have expired
-type Database = [(Text, Token)]
+-- * Storage of OAuth2 tokens in memory
 
-empty :: Database
-empty = []
+-- TODO: Deal with tokens which have expired
+type Database = M.Map Text Token
 
 addToTokenDb :: Text -> Token -> IORef Database -> IO ()
 addToTokenDb userSessionId authToken dbRef = do
-  atomicModifyIORef' dbRef (\db -> ((userSessionId, authToken) : db, ()))
+  atomicModifyIORef' dbRef (\db -> (M.insert userSessionId authToken db, ()))
+
+removeFromTokenDb :: Text -> IORef Database -> IO ()
+removeFromTokenDb userSessionId dbRef = do
+  atomicModifyIORef' dbRef (\db -> (M.delete userSessionId db, ()))
+
+-- * Generating RedditEnv values to use
 
 -- | Retrieve authentication code from cookie, and thus the token from the
 -- database, if the user has one.
@@ -44,7 +49,7 @@ retrieveRedditEnv :: IORef Database -> S.ActionM (Maybe RedditEnv)
 retrieveRedditEnv dbRef = do
   db <- liftIO $ readIORef dbRef
   maybeCookie <- SC.getCookie tokenCookieName
-  case maybeCookie >>= (`List.lookup` db) of
+  case maybeCookie >>= (`M.lookup` db) of
     Just t -> Just <$> liftIO (newEnv t (userAgent config))
     Nothing -> pure Nothing
 
@@ -111,7 +116,7 @@ makeTableRowFromSql (pid, purl, ptitle, psubmitter, ptime, pflair) =
 headHtml :: Maybe Text -> Html ()
 headHtml titleExtra = do
   head_ $ do
-    title_ $ toHtml (maybe "ApriBot" ("ApriBot | " <>) titleExtra)
+    title_ $ toHtml (maybe "ApriBot" ("ApriBot :: " <>) titleExtra)
     link_ [rel_ "stylesheet", href_ "static/styles.css"]
 
 -- * HTML that is actually served
@@ -136,8 +141,6 @@ mainHtml = do
           a_ [href_ "https://reddit.com/r/pokemontrades"] "/r/pokemontrades"
           " subreddit and identifies potential Aprimon-related threads."
           " It does so by scanning for certain keywords in either the post title or body."
-          " This is admittedly not very sophisticated, and leads to quite a few false positives."
-          " In the long term, it would be nice to have a better algorithm for this."
         p_ $ do
           toHtml (printf "So far, ApriBot has processed a total of %d posts," n :: String)
           toHtml (printf " of which %d were hits (%.2f%%)." m (100 * fromIntegral m / fromIntegral n :: Double) :: String)
@@ -146,10 +149,15 @@ mainHtml = do
           "ApriBot is implemented with Haskell and SQLite."
           " If you’re interested, its source code is on "
           a_ [href_ "https://github.com/penelopeysm/apribot"] "GitHub"
-          "."
+          ". (Issues and pull requests are welcome!) "
           "If you have any questions about ApriBot, feel free to get in touch with me, either via GitHub or "
           a_ [href_ "https://reddit.com/u/is_a_togekiss"] "Reddit"
           "."
+        p_ $ do
+          b_ "I am currently looking for people to help me improve ApriBot's hit-detection algorithm."
+          " If you are interested and have a few minutes to spare, head over to the "
+          a_ [href_ "/contribute"] "contribute page"
+          ". I will be very grateful!"
       h2_ "Hits"
       if null hits
         then p_ "None so far!"
@@ -163,41 +171,13 @@ mainHtml = do
           tableHeaderSql
           mapM_ makeTableRowFromSql (take 50 nonhits)
 
--- | HTML for login page
-loginHtml :: Text -> Text -> Text -> Html ()
-loginHtml clientId state redirectUri =
-  let redditUrl =
-        mkRedditAuthURL $
-          AuthUrlParams
-            { authUrlClientID = clientId,
-              authUrlState = Just state,
-              authUrlRedirectUri = redirectUri,
-              authUrlDuration = Temporary,
-              authUrlScopes = Set.singleton ScopeIdentity
-            }
-   in html_ $ do
-        headHtml (Just "Login")
-        body_ $ main_ $ do
-          p_ "To access this page, you need to log in with Reddit."
-          a_ [href_ redditUrl] $ h2_ $ p_ "Click here to do so."
-
--- | HTML to show the user's details
-timeHtml :: Text -> UTCTime -> Html ()
-timeHtml username createdTime = do
-  headHtml (Just "Success")
-  body_ $ do
-    p_ $ toHtml $ "Welcome~ You are now logged in as user: " <> username <> "."
-    p_ $ toHtml $ "You have been on Reddit since: " <> show createdTime <> "!"
-
--- * Main page
-
 -- | Thread for the web server
 web :: MVar () -> IO ()
 web lock = do
   clientId <- getEnvAsText "REDDIT_FE_ID"
   clientSecret <- getEnvAsText "REDDIT_FE_SECRET"
   css <- getDataFileName "static/styles.css"
-  dbRef <- newIORef empty
+  dbRef <- newIORef M.empty
   atomically lock $ printf "Launching web server on port %d...\n" (port config)
 
   S.scotty (port config) $ do
@@ -208,38 +188,120 @@ web lock = do
       S.setHeader "Content-Type" "text/css"
       S.file css
 
-    S.get "/login" $ do
-      state <- liftIO $ randomText 24
-      hash <- liftIO $ unPasswordHash <$> hashPassword (mkPassword state)
-      let stateCookie = SC.makeSimpleCookie hashedStateCookieName hash
-      SC.setCookie $
-        stateCookie
-          { C.setCookieHttpOnly = True,
-            -- Secure works with localhost over HTTP in Firefox and Chrome
-            C.setCookieSecure = True,
-            -- Surely 5 minutes is enough for the user to log in
-            C.setCookieMaxAge = Just (secondsToDiffTime 300)
-          }
-      S.html $ renderText $ loginHtml clientId state (redirectUri config)
-
     S.get "/authorised" $ do
       makeNewRedditEnv clientId clientSecret (redirectUri config) dbRef
-      S.redirect "/time"
+      S.redirect "/contribute"
 
     S.get "/auth_error" $ do
       S.html $ renderText $ html_ $ do
         headHtml (Just "Error")
         body_ $ main_ $ do
-          p_ "There was an error logging you in."
-          a_ [href_ "/login"] $ h2_ $ p_ "Please try again."
+          h1_ "Authentication error :("
+          p_ "Sorry! There was an error logging you in. This might be because you took too long to log in (you have to do so within 10 minutes of opening the page)."
+          p_ $ a_ [href_ "/contribute"] "Please try again, and let me know if it still doesn't work."
 
-    S.get "/time" $ do
+    S.get "/logout" $ do
+      -- Remove token from database
+      maybeCookie <- SC.getCookie tokenCookieName
+      case maybeCookie of
+        Nothing -> S.redirect "/"
+        Just cookie -> do
+          liftIO $ removeFromTokenDb cookie dbRef
+          SC.deleteCookie tokenCookieName
+          S.html $ renderText $ html_ $ do
+            headHtml (Just "Logged out")
+            body_ $ main_ $ do
+              h1_ "Logged out"
+              p_ "You have been logged out. Thank you so much for your time!"
+              p_ $ do
+                "Return to the "
+                a_ [href_ "/"] "home page"
+                ", or the "
+                a_ [href_ "/contribute"] "contribute page"
+                "."
+
+    S.get "/contribute" $ do
       maybeEnv <- retrieveRedditEnv dbRef
       case maybeEnv of
-        Nothing -> S.redirect "/login"
+        -- User is not logged in
+        Nothing -> do
+          -- Generate a random state for the user, and store it as a cookie
+          state <- liftIO $ randomText 40
+          hash <- liftIO $ unPasswordHash <$> hashPassword (mkPassword state)
+          let stateCookie = SC.makeSimpleCookie hashedStateCookieName hash
+          SC.setCookie $
+            stateCookie
+              { C.setCookieHttpOnly = True,
+                -- Secure works with localhost over HTTP in Firefox and Chrome
+                C.setCookieSecure = True,
+                -- Surely 10 minutes is enough for the user to log in
+                C.setCookieMaxAge = Just (secondsToDiffTime 600)
+              }
+          -- Get the Reddit OAuth login link
+          let redditUrl =
+                mkRedditAuthURL $
+                  AuthUrlParams
+                    { authUrlClientID = clientId,
+                      authUrlState = Just state,
+                      authUrlRedirectUri = redirectUri config,
+                      authUrlDuration = Temporary,
+                      authUrlScopes = Set.singleton ScopeIdentity
+                    }
+          S.html $ renderText $ html_ $ do
+            headHtml (Just "Contributing")
+            body_ $ main_ $ do
+              h1_ "Contribute"
+              p_ $ i_ $ a_ [href_ "/"] "(back to home page)"
+              p_ $ do
+                "Right now, ApriBot uses a very primitive keyword-searching system for identifying Aprimon-related posts. "
+                "My goal is to eventually replace this with some sort of machine learning algorithm. "
+              p_ $ do
+                "However, to do this, I need "
+                i_ "labelled data"
+                ": that is, a number of posts which have been manually classified (by experts—yes, that's you!) as being either Aprimon-related or not. "
+                "If you have a few minutes to spare, please consider helping me out by labelling some posts."
+              p_ $ do
+                "To do this, you will need to "
+                b_ $ a_ [href_ redditUrl] "log in with Reddit"
+                "."
+              p_ $ do
+                "The permissions I am requesting do not give me access any of your personal information, apart from your Reddit username and the time you created your account. "
+                "I only need this to make sure that you don't label the same post multiple times."
+        -- User is logged in
         Just env -> do
-          (username, createdTime) <- liftIO $ runRedditT' env $ do
-            me <- myAccount
-            pure (accountUsername me, accountCreatedTime me)
-          -- Show it to the user
-          S.html $ renderText (timeHtml username createdTime)
+          username <- liftIO $ runRedditT' env (accountUsername <$> myAccount)
+          sql <- liftIO $ getDataFileName (dbFileName config) >>= open
+          nl <- liftIO $ getNumberLabelled username sql
+          next <- liftIO $ getNextUnlabelledPost sql
+          liftIO $ close sql
+          S.html $ renderText $ html_ $ do
+            headHtml (Just "Contributing")
+            body_ $ main_ $ do
+              h1_ "Contribute"
+              p_ $ do
+                "("
+                i_ $ a_ [href_ "/"] "back to home page"
+                " — "
+                i_ $ a_ [href_ "/logout"] "logout"
+                ")"
+              p_ $ do
+                span_ $ b_ $ do
+                  "You are now logged in as: /u/"
+                  toHtml username
+                  "."
+                " You have labelled a total of "
+                toHtml $ show nl
+                " post"
+                toHtml $ if nl == 1 then "." else "s." :: Text
+                toHtml $ if nl > 0 then "Thank you so much! <3" else "" :: Text
+                case next of
+                     -- This is very optimistic...
+                     Nothing -> do
+                       p_ "There are no more unlabelled posts. Please check back again tomorrow!"
+                     Just (postId, postUrl) -> do
+                       p_ $ do
+                         "Post ID: "
+                         toHtml postId
+                        -- TODO: Fix this. Reddit doesn't allow its content to
+                        -- be embedded in iframes.
+                       iframe_ [src_ postUrl, width_ "100%", height_ "500px"] ""

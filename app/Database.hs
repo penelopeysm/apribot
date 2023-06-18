@@ -1,4 +1,6 @@
--- | Database schema:
+-- | Database containing Reddit posts, as well as community votes on the posts.
+--
+-- The schema for the 'posts' database is as follows:
 --    - id         : Post ID. This is the primary key.
 --    - url        : Post URL.
 --    - title      : Post title.
@@ -11,11 +13,21 @@
 --    - truth      : 1 or 0, indicates whether the post was really of interest.
 --                   This has to be manually determined by human volunteers (I
 --                   think). If null, the truth has not been determined.
---    - agree      : Comma-separated list of people who think the post is
---                   interesting.
---    - disagree   : Comma-separated list of people who think the post is
---                   NOT interesting.
-module Database (addToDb, getLatestHits, getLatestNonHits, getTotalRows, getTotalHits) where
+--
+-- The schema for the 'votes' database is as follows:
+--    - id         : Post ID. This is the primary key.
+--    - username   : The Reddit username of the person who voted (no \/u\/ prefix).
+--    - vote       : 1 if the user says it is Aprimon-related. 0 if not.
+module Database
+  ( addToDb,
+    getLatestHits,
+    getLatestNonHits,
+    getTotalRows,
+    getTotalHits,
+    getNumberLabelled,
+    getNextUnlabelledPost,
+  )
+where
 
 import Config
 import Control.Monad (forM_)
@@ -37,8 +49,8 @@ addToDb post hit = do
   sql <- getDataFileName (dbFileName config) >>= open
   executeNamed
     sql
-    "INSERT INTO posts (id, url, title, body, submitter, hit, time, flair, agree, disagree) \
-    \ VALUES (:id, :url, :title, :body, :submitter, :hit, :time, :flair, '', '')"
+    "INSERT INTO posts (id, url, title, body, submitter, hit, time, flair) \
+    \ VALUES (:id, :url, :title, :body, :submitter, :hit, :time, :flair)"
     [ ":id" := unPostID (postId post),
       ":url" := postUrl post,
       ":title" := postTitle post,
@@ -48,7 +60,7 @@ addToDb post hit = do
       ":time" := formatTime defaultTimeLocale "%F %T" (postCreatedTime post),
       ":flair" := fromMaybe "" (postFlairText post)
     ]
-  n <- fromOnly . Prelude.head <$> (query_ sql "SELECT COUNT(*) FROM posts;" :: IO [Only Int])
+  n <- fromOnly . head <$> (query_ sql "SELECT COUNT(*) FROM posts;" :: IO [Only Int])
   close sql
   printf "Added post to database (%d total posts)\n" n
 
@@ -62,13 +74,28 @@ getLatestNonHits n conn =
 
 getTotalRows :: Connection -> IO Int
 getTotalRows conn =
-  fromOnly . Prelude.head
+  fromOnly . head
     <$> query_ conn "SELECT COUNT(*) FROM posts WHERE hit = 1 or hit = 0;"
 
 getTotalHits :: Connection -> IO Int
 getTotalHits conn =
-  fromOnly . Prelude.head
+  fromOnly . head
     <$> query_ conn "SELECT COUNT(*) FROM posts WHERE hit = 1;"
+
+getNumberLabelled :: Text -> Connection -> IO Int
+getNumberLabelled username conn =
+  fromOnly . head
+    <$> query_ conn (Query . T.pack $ printf "SELECT COUNT(*) FROM votes WHERE username = '%s';" username)
+
+getNextUnlabelledPost :: Connection -> IO (Maybe (Text, Text))
+getNextUnlabelledPost conn = do
+  unlabelled :: [(Text, Text)] <-
+    query_
+      conn
+      "SELECT id, url FROM posts WHERE id NOT IN (SELECT id FROM votes) AND truth IS NULL ORDER BY RANDOM() LIMIT 1"
+  case unlabelled of
+    [] -> pure Nothing
+    (p : _) -> pure (Just p)
 
 -- | Set up the database from scratch. Do not use this unless you want to start
 -- all over again...!
@@ -87,9 +114,7 @@ _populateDB = do
     \ time TEXT NOT NULL,\
     \ flair TEXT NOT NULL, \
     \ hit INTEGER,\
-    \ truth INTEGER, \
-    \ agree TEXT NOT NULL, \
-    \ disagree TEXT NOT NULL);"
+    \ truth INTEGER);"
   ownerUsername <- getEnvAsText "REDDIT_USERNAME"
   ownerPassword <- getEnvAsText "REDDIT_PASSWORD"
   ownerClientId <- getEnvAsText "REDDIT_FE_ID"
@@ -102,8 +127,8 @@ _populateDB = do
     forM_ last1000Posts $ \post -> liftIO $ do
       executeNamed
         sql
-        "INSERT INTO posts (id, url, title, body, submitter, time, flair, agree, disagree) \
-        \ VALUES (:id, :url, :title, :body, :submitter, :time, :flair, '', '')"
+        "INSERT INTO posts (id, url, title, body, submitter, time, flair) \
+        \ VALUES (:id, :url, :title, :body, :submitter, :time, :flair)"
         [ ":id" := unPostID (postId post),
           ":url" := postUrl post,
           ":title" := postTitle post,
