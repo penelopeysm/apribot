@@ -197,7 +197,9 @@ web lock = do
         headHtml (Just "Error")
         body_ $ main_ $ do
           h1_ "Authentication error :("
-          p_ "Sorry! There was an error logging you in. This might be because you took too long to log in (you have to do so within 10 minutes of opening the page)."
+          p_ $ do
+            "Sorry! There was an error logging you in. "
+            "This might be because you denied ApriBot access, or you took too long to log in (you have to do so within 10 minutes of opening the page)."
           p_ $ a_ [href_ "/contribute"] "Please try again, and let me know if it still doesn't work."
 
     S.get "/logout" $ do
