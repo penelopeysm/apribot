@@ -2,47 +2,78 @@
 @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400&family=Nunito+Sans:ital,wght@0,400;0,700;1,400;1,700&display=swap');
 
 th {
-    background-color: #bbe7f0;
+  background-color: #bbe7f0;
 }
 
 th {
-    font-weight: bold;
+  font-weight: bold;
 }
 
 th, td {
-    padding: 5px;
+  padding: 5px;
 }
 
 table, th, td {
-    border: 1px solid;
+  border: 1px solid;
 }
 
 table {
-    border-collapse: collapse;
+  border-collapse: collapse;
 }
 
 h2 {
-    margin-top: 30px;
+  margin-top: 30px;
 }
 
 body {
-    margin: 40px;
-    font-family: 'Nunito Sans', sans-serif;
-    line-height: 1.6;
-    background-color: #f2f8fa;
+  margin: 40px;
+  font-family: 'Nunito Sans', sans-serif;
+  line-height: 1.6;
+  background-color: #f2f8fa;
 }
 
 main {
-    margin: auto;
-    max-width: 1000px;
+  margin: auto;
+  max-width: 1000px;
 }
 
 code {
-    font-family: 'Fira Code', monospace;
-    font-size: 13px;
+  font-family: 'Fira Code', monospace;
+  font-size: 13px;
 }
 
-.centred {
+div.form-container {
   display: flex;
   justify-content: center;
+}
+
+form.aprimon-question {
+  display: flex;
+  gap: 10px;
+  padding: 10px;
+  border: 2px solid black;
+  border-radius: 5px;
+  background-color: #bbe7f0;
+}
+
+button {
+  font-family: 'Nunito Sans', sans-serif;
+}
+
+span.title {
+  font-size: 120%;
+  font-weight: bold;
+}
+
+span.boxed-flair {
+  font-size: 80%;
+  border: 1px solid #000;
+  border-radius: 5px;
+  padding: 1px 5px;
+  margin-left: 10px;
+  vertical-align: text-top;
+}
+
+div.post-body {
+  padding: 0px 20px;
 }

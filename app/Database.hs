@@ -89,13 +89,13 @@ getNumberLabelled username conn =
   fromOnly . head
     <$> query_ conn (Query . T.pack $ printf "SELECT COUNT(*) FROM votes WHERE username = '%s';" username)
 
--- | Returns post ID, URL, title, body, submitter, time
-getNextUnlabelledPost :: Connection -> IO (Maybe (Text, Text, Text, Text, Text, Text))
+-- | Returns post ID, URL, title, body, submitter, time, flair
+getNextUnlabelledPost :: Connection -> IO (Maybe (Text, Text, Text, Text, Text, Text, Text))
 getNextUnlabelledPost conn = do
   unlabelled <-
     query_
       conn
-      "SELECT id, url, title, body, submitter, time FROM posts WHERE id NOT IN (SELECT id FROM votes) AND truth IS NULL ORDER BY RANDOM() LIMIT 1"
+      "SELECT id, url, title, body, submitter, time, flair FROM posts WHERE id NOT IN (SELECT id FROM votes) AND truth IS NULL ORDER BY RANDOM() LIMIT 1"
   case unlabelled of
     [] -> pure Nothing
     (p : _) -> pure (Just p)

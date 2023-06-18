@@ -83,7 +83,8 @@ executable apribot
                       time,
                       random,
                       password,
-                      bytestring
+                      bytestring,
+                      cmark-gfm
 
     -- Directories containing source files.
     hs-source-dirs:   app

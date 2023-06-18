@@ -1,5 +1,6 @@
 module Web (web) where
 
+import CMarkGFM
 import Config
 import Control.Applicative (liftA2)
 import Control.Concurrent (MVar)
@@ -18,6 +19,7 @@ import Paths_apribot (getDataFileName)
 import Reddit
 import Reddit.Auth (Token (..))
 import Text.Printf (printf)
+import qualified Data.Text as T
 import Utils
 import qualified Web.Cookie as C
 import qualified Web.Scotty as S
@@ -198,6 +200,111 @@ mainHtml = do
           tableHeaderSql
           mapM_ makeTableRowFromSql (take 50 nonhits)
 
+logoutHtml :: Html ()
+logoutHtml = do
+  headHtml (Just "Logged out")
+  body_ $ main_ $ do
+    h1_ "Logged out"
+    p_ "You have been logged out. Thank you so much for your time!"
+    p_ $ do
+      "Return to the "
+      a_ [href_ "/"] "home page"
+      ", or the "
+      a_ [href_ "/contribute"] "contribute page"
+      "."
+
+authErrorHtml :: Html ()
+authErrorHtml = do
+  headHtml (Just "Error")
+  body_ $ main_ $ do
+    h1_ "Authentication error :("
+    p_ $ do
+      "Sorry! There was an error logging you in. "
+      "This might be because you denied ApriBot access, or you took too long to log in (you have to do so within 10 minutes of opening the page)."
+    p_ $ a_ [href_ "/contribute"] "Please try again, and let me know if it still doesn't work."
+
+contribErrorHtml :: Html ()
+contribErrorHtml = do
+  headHtml (Just "Error")
+  body_ $ main_ $ do
+    h1_ "Form submission error :("
+    p_ $ do
+      "Sorry! There was an error recording your vote. "
+    p_ $ a_ [href_ "/contribute"] "Please try again, and let me know if it still doesn't work."
+
+contributingLoggedOutHtml :: Text -> Html ()
+contributingLoggedOutHtml redditUrl = do
+  headHtml (Just "Contributing")
+  body_ $ main_ $ do
+    h1_ "Contribute"
+    p_ $ i_ $ a_ [href_ "/"] "(back to home page)"
+    p_ $ do
+      "Right now, ApriBot uses a very primitive keyword-searching system for identifying Aprimon-related posts. "
+      "My goal is to eventually replace this with some sort of machine learning algorithm. "
+    p_ $ do
+      "However, to do this, I need "
+      i_ "labelled data"
+      ": that is, a number of posts which have been manually classified (by experts—yes, that's you!) as being either Aprimon-related or not. "
+      "If you have a few minutes to spare, please consider helping me out by labelling some posts."
+    p_ $ do
+      "To do this, you will need to "
+      b_ $ a_ [href_ redditUrl] "log in with Reddit"
+      "."
+    p_ $ do
+      "The permissions I am requesting do not give me access any of your personal information, apart from your Reddit username and the time you created your account. "
+      "I only need this to make sure that you don't label the same post multiple times."
+
+contributingLoggedInHtml ::
+  Text ->
+  Int ->
+  Maybe (Text, Text, Text, Text, Text, Text, Text) ->
+  Html ()
+contributingLoggedInHtml username nLabelled nextPost = do
+  headHtml (Just "Contributing")
+  body_ $ main_ $ do
+    h1_ "Contribute"
+    p_ $ i_ $ do
+      "("
+      a_ [href_ "/"] "back to home page"
+      " — "
+      a_ [href_ "/logout"] "logout"
+      ")"
+    p_ $ do
+      span_ $ b_ $ do
+        "You are now logged in as: /u/"
+        toHtml username
+        "."
+      " You have labelled a total of "
+      toHtml $ show nLabelled
+      " post"
+      toHtml $ if nLabelled == 1 then "." else "s." :: Text
+      toHtml $ if nLabelled > 0 then " Thank you so much! <3" else "" :: Text
+      case nextPost of
+        -- This is very optimistic...
+        Nothing -> do
+          hr_ []
+          p_ "There are no more unlabelled posts. Please check back again tomorrow!"
+        Just (postId, postUrl, postTitle, postBody, postSubmitter, postTime, postFlair) -> do
+          div_ [class_ "form-container"] $ do
+            form_ [class_ "aprimon-question", action_ "/contribute", method_ "post"] $ do
+              span_ $ b_ "Is the post below related?"
+              input_ [type_ "hidden", name_ "id", value_ postId]
+              input_ [type_ "hidden", name_ "username", value_ username]
+              button_ [type_ "submit", name_ "vote", value_ "1"] "Yes"
+              button_ [type_ "submit", name_ "vote", value_ "0"] "No"
+          div_ $ do
+            span_ [class_ "title"] $ toHtml postTitle
+            span_ [class_ "boxed-flair"] $ toHtml postFlair
+          ul_ $ do
+            li_ $ toHtml (printf "Submitted by /u/%s at %s UTC" postSubmitter postTime :: String)
+            li_ $ do
+              a_ [href_ postUrl] "Link to original Reddit post"
+          if T.null (T.strip postBody)
+            then p_ "<empty post body>"
+            else div_ [class_ "post-body"] $
+              toHtmlRaw $
+                commonmarkToHtml [optSmart] [extTable, extStrikethrough] postBody
+
 -- | Thread for the web server
 web :: MVar () -> IO ()
 web lock = do
@@ -220,23 +327,10 @@ web lock = do
       S.redirect "/contribute"
 
     S.get "/auth_error" $ do
-      S.html $ renderText $ html_ $ do
-        headHtml (Just "Error")
-        body_ $ main_ $ do
-          h1_ "Authentication error :("
-          p_ $ do
-            "Sorry! There was an error logging you in. "
-            "This might be because you denied ApriBot access, or you took too long to log in (you have to do so within 10 minutes of opening the page)."
-          p_ $ a_ [href_ "/contribute"] "Please try again, and let me know if it still doesn't work."
+      S.html $ renderText $ html_ authErrorHtml
 
     S.get "/contrib_error" $ do
-      S.html $ renderText $ html_ $ do
-        headHtml (Just "Error")
-        body_ $ main_ $ do
-          h1_ "Form submission error :("
-          p_ $ do
-            "Sorry! There was an error recording your vote. "
-          p_ $ a_ [href_ "/contribute"] "Please try again, and let me know if it still doesn't work."
+      S.html $ renderText $ html_ contribErrorHtml
 
     S.get "/logout" $ do
       -- Remove token from database
@@ -245,17 +339,7 @@ web lock = do
         Nothing -> S.redirect "/"
         Just _ -> do
           cleanup dbRef
-          S.html $ renderText $ html_ $ do
-            headHtml (Just "Logged out")
-            body_ $ main_ $ do
-              h1_ "Logged out"
-              p_ "You have been logged out. Thank you so much for your time!"
-              p_ $ do
-                "Return to the "
-                a_ [href_ "/"] "home page"
-                ", or the "
-                a_ [href_ "/contribute"] "contribute page"
-                "."
+          S.html $ renderText $ html_ logoutHtml
 
     S.post "/contribute" $ do
       mPostId :: Maybe Text <- (Just <$> S.param "id") `S.rescue` const (pure Nothing)
@@ -290,37 +374,16 @@ web lock = do
                 -- Surely 10 minutes is enough for the user to log in
                 C.setCookieMaxAge = Just (secondsToDiffTime 600)
               }
-          -- Get the Reddit OAuth login link
-          let redditUrl =
-                mkRedditAuthURL $
-                  AuthUrlParams
-                    { authUrlClientID = clientId,
-                      authUrlState = Just state,
-                      authUrlRedirectUri = redirectUri config,
-                      authUrlDuration = Temporary,
-                      authUrlScopes = Set.singleton ScopeIdentity
-                    }
-
           S.html $ renderText $ html_ $ do
-            headHtml (Just "Contributing")
-            body_ $ main_ $ do
-              h1_ "Contribute"
-              p_ $ i_ $ a_ [href_ "/"] "(back to home page)"
-              p_ $ do
-                "Right now, ApriBot uses a very primitive keyword-searching system for identifying Aprimon-related posts. "
-                "My goal is to eventually replace this with some sort of machine learning algorithm. "
-              p_ $ do
-                "However, to do this, I need "
-                i_ "labelled data"
-                ": that is, a number of posts which have been manually classified (by experts—yes, that's you!) as being either Aprimon-related or not. "
-                "If you have a few minutes to spare, please consider helping me out by labelling some posts."
-              p_ $ do
-                "To do this, you will need to "
-                b_ $ a_ [href_ redditUrl] "log in with Reddit"
-                "."
-              p_ $ do
-                "The permissions I am requesting do not give me access any of your personal information, apart from your Reddit username and the time you created your account. "
-                "I only need this to make sure that you don't label the same post multiple times."
+            contributingLoggedOutHtml $
+              mkRedditAuthURL $
+                AuthUrlParams
+                  { authUrlClientID = clientId,
+                    authUrlState = Just state,
+                    authUrlRedirectUri = redirectUri config,
+                    authUrlDuration = Temporary,
+                    authUrlScopes = Set.singleton ScopeIdentity
+                  }
 
         -- User is logged in
         Just env -> do
@@ -332,48 +395,9 @@ web lock = do
             Right username -> do
               -- Get data from database
               sql <- liftIO $ getDataFileName (dbFileName config) >>= open
-              nl <- liftIO $ getNumberLabelled username sql
-              next <- liftIO $ getNextUnlabelledPost sql
+              nLabelled <- liftIO $ getNumberLabelled username sql
+              nextPost <- liftIO $ getNextUnlabelledPost sql
               liftIO $ close sql
-
               -- Serve HTML
               S.html $ renderText $ html_ $ do
-                headHtml (Just "Contributing")
-                body_ $ main_ $ do
-                  h1_ "Contribute"
-                  p_ $ i_ $ do
-                    "("
-                    a_ [href_ "/"] "back to home page"
-                    " — "
-                    a_ [href_ "/logout"] "logout"
-                    ")"
-                  p_ $ do
-                    span_ $ b_ $ do
-                      "You are now logged in as: /u/"
-                      toHtml username
-                      "."
-                    " You have labelled a total of "
-                    toHtml $ show nl
-                    " post"
-                    toHtml $ if nl == 1 then "." else "s." :: Text
-                    toHtml $ if nl > 0 then " Thank you so much! <3" else "" :: Text
-                    hr_ []
-                    case next of
-                      -- This is very optimistic...
-                      Nothing -> do
-                        p_ "There are no more unlabelled posts. Please check back again tomorrow!"
-                      Just (postId, postUrl, postTitle, postBody, postSubmitter, postTime) -> do
-                        div_ [class_ "centred"] $ do
-                          div_ $ do
-                            form_ [action_ "/contribute", method_ "post"] $ do
-                              span_ $ b_ "Is this Aprimon-related?"
-                              input_ [type_ "hidden", name_ "id", value_ postId]
-                              input_ [type_ "hidden", name_ "username", value_ username]
-                              button_ [type_ "submit", name_ "vote", value_ "1"] "Yes"
-                              button_ [type_ "submit", name_ "vote", value_ "0"] "No"
-                        h3_ $ toHtml postTitle
-                        ul_ $ do
-                          li_ $ toHtml (printf "Submitted by /u/%s at %s UTC" postSubmitter postTime :: String)
-                          li_ $ do
-                            a_ [href_ postUrl] "Link to original Reddit post"
-                        p_ $ toHtml postBody
+                contributingLoggedInHtml username nLabelled nextPost
