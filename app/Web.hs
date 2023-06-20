@@ -218,6 +218,24 @@ logoutHtml = do
       a_ [href_ "/contribute"] "contribute page"
       "."
 
+privacyHtml :: Html ()
+privacyHtml = do
+  headHtml (Just "Privacy")
+  body_ $ main_ $ do
+    h1_ "Privacy"
+    p_ $ i_ $ do
+      "("
+      a_ [href_ "/contribute"] "back to contribute page"
+      ")"
+    p_ $ do
+      "The only personal information ApriBot stores about you is your Reddit username (on posts which you have labelled). "
+      "This information is required to make sure that you are not asked to label the same post twice. "
+      "It is not shared with anybody else, and your votes can only be viewed by you. "
+      "ApriBot uses a single cookie to log you into Reddit and to store your login status, but otherwise does not perform any other tracking. "
+      "The source code of ApriBot can be viewed on "
+      a_ [href_ "https://github.com/penelopeysm/apribot"] "GitHub"
+      "."
+
 authErrorHtml :: Html ()
 authErrorHtml = do
   headHtml (Just "Error")
@@ -242,7 +260,12 @@ contributingLoggedOutHtml redditUrl = do
   headHtml (Just "Contributing")
   body_ $ main_ $ do
     h1_ "Contribute"
-    p_ $ i_ $ a_ [href_ "/"] "(back to home page)"
+    p_ $ i_ $ do
+      "("
+      a_ [href_ "/"] "back to home page"
+      " — "
+      a_ [href_ "/privacy"] "privacy"
+      ")"
     p_ $ do
       "Right now, ApriBot uses a very primitive keyword-searching system for identifying Aprimon-related posts. "
       "My goal is to eventually replace this with some sort of machine learning algorithm. "
@@ -272,6 +295,10 @@ contributingLoggedInHtml username nLabelled nextPost = do
       "("
       a_ [href_ "/"] "back to home page"
       " — "
+      a_ [href_ "/privacy"] "privacy"
+      " — "
+      a_ [href_ "/your_votes"] "view your votes"
+      " — "
       a_ [href_ "/logout"] "logout"
       ")"
     p_ $ b_ $ do
@@ -281,14 +308,10 @@ contributingLoggedInHtml username nLabelled nextPost = do
       " You have labelled a total of "
       toHtml $ show nLabelled
       " post"
-      if nLabelled == 1 then "" else "s"
+      if nLabelled == 1 then "." else "s."
       if nLabelled > 0
-        then do
-          " ("
-          a_ [href_ "/your_votes"] "view"
-          "). Thank you so much! <3"
-        else do
-          "."
+        then " Thank you so much! <3"
+        else ""
       case nextPost of
         -- This is very optimistic...
         Nothing -> do
@@ -331,7 +354,14 @@ yourVotesHtml username votes = do
   headHtml (Just "Your votes")
   body_ $ main_ $ do
     h1_ "Your votes"
-    p_ $ i_ $ a_ [href_ "/contribute"] "(back to contributing page)"
+    p_ $ i_ $ do
+      "("
+      a_ [href_ "/contribute"] "back to contributing page"
+      " — "
+      a_ [href_ "/privacy"] "privacy"
+      " — "
+      a_ [href_ "/logout"] "logout"
+      ")"
     p_ $ b_ $ do
       "You are now logged in as: /u/"
       toHtml username
@@ -342,7 +372,9 @@ yourVotesHtml username votes = do
           "Here are all the posts you have labelled so far (most recent on top). "
           "Thank you so much for your help!"
         p_ $ do
-          "If you find you need to change or delete any of your votes, please get in touch with me."
+          "If you find you need to change or delete any of your votes, please get in touch with me via "
+          a_ [href_ "https://reddit.com/u/is_a_togekiss"] "Reddit"
+          "."
         table_ $ do
           thead_ $ do
             tr_ $ do
