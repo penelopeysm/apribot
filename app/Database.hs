@@ -15,7 +15,8 @@
 --                   think). If null, the truth has not been determined.
 --
 -- The schema for the 'votes' database is as follows:
---    - id         : Post ID. This is the primary key.
+--    - n          : A numeric id. This is the primary key and autoincrements.
+--    - id         : Post ID.
 --    - username   : The Reddit username of the person who voted (no \/u\/ prefix).
 --    - vote       : 1 if the user says it is Aprimon-related. 0 if not.
 module Database
@@ -28,6 +29,7 @@ module Database
     getNextUnlabelledPost,
     addVote,
     getNumVotes,
+    getAllVotesBy,
   )
 where
 
@@ -115,6 +117,15 @@ getNumVotes :: Connection -> IO Int
 getNumVotes conn =
   fromOnly . head
     <$> query_ conn "SELECT COUNT(*) FROM votes;"
+
+-- | Get all votes by a given user. Returned in descending order of time, i.e.
+-- most recent votes first.
+getAllVotesBy :: Text -> Connection -> IO [(Text, Text, Text, Text, Int)]
+getAllVotesBy username conn =
+  queryNamed
+    conn
+    "SELECT votes.id, posts.title, posts.url, posts.submitter, votes.vote FROM posts INNER JOIN votes ON posts.id=votes.id WHERE votes.username = :username ORDER BY votes.n DESC;"
+    [":username" := username]
 
 -- | Set up the database from scratch. Do not use this unless you want to start
 -- all over again...!

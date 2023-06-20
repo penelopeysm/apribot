@@ -11,6 +11,7 @@ import qualified Data.Map as M
 import Data.Password.Bcrypt
 import qualified Data.Set as Set
 import Data.Text (Text)
+import qualified Data.Text as T
 import Data.Time.Clock (secondsToDiffTime)
 import Database
 import Database.SQLite.Simple
@@ -19,7 +20,6 @@ import Paths_apribot (getDataFileName)
 import Reddit
 import Reddit.Auth (Token (..))
 import Text.Printf (printf)
-import qualified Data.Text as T
 import Utils
 import qualified Web.Cookie as C
 import qualified Web.Scotty as S
@@ -196,14 +196,14 @@ mainHtml = do
       if null hits
         then p_ "None so far!"
         else table_ $ do
-          tableHeaderSql
-          mapM_ makeTableRowFromSql (take 50 hits)
+          thead_ tableHeaderSql
+          tbody_ $ mapM_ makeTableRowFromSql (take 50 hits)
       h2_ "Non-hits"
       if null nonhits
         then p_ "None so far!"
         else table_ $ do
-          tableHeaderSql
-          mapM_ makeTableRowFromSql (take 50 nonhits)
+          thead_ tableHeaderSql
+          tbody_ $ mapM_ makeTableRowFromSql (take 50 nonhits)
 
 logoutHtml :: Html ()
 logoutHtml = do
@@ -274,16 +274,21 @@ contributingLoggedInHtml username nLabelled nextPost = do
       " — "
       a_ [href_ "/logout"] "logout"
       ")"
+    p_ $ b_ $ do
+      "You are now logged in as: /u/"
+      toHtml username
     p_ $ do
-      span_ $ b_ $ do
-        "You are now logged in as: /u/"
-        toHtml username
-        "."
       " You have labelled a total of "
       toHtml $ show nLabelled
       " post"
-      toHtml $ if nLabelled == 1 then "." else "s." :: Text
-      toHtml $ if nLabelled > 0 then " Thank you so much! <3" else "" :: Text
+      if nLabelled == 1 then "" else "s"
+      if nLabelled > 0
+        then do
+          " ("
+          a_ [href_ "/your_votes"] "view"
+          "). Thank you so much! <3"
+        else do
+          "."
       case nextPost of
         -- This is very optimistic...
         Nothing -> do
@@ -306,9 +311,47 @@ contributingLoggedInHtml username nLabelled nextPost = do
               a_ [href_ postUrl] "Link to original Reddit post"
           if T.null (T.strip postBody)
             then p_ "<empty post body>"
-            else div_ [class_ "post-body"] $
-              toHtmlRaw $
-                commonmarkToHtml [optSmart] [extTable, extStrikethrough] postBody
+            else
+              div_ [class_ "post-body"] $
+                toHtmlRaw $
+                  commonmarkToHtml [optSmart] [extTable, extStrikethrough] postBody
+
+yourVotesHtml :: Text -> [(Text, Text, Text, Text, Int)] -> Html ()
+yourVotesHtml username votes = do
+  let makeTableRow :: (Text, Text, Text, Text, Int) -> Html ()
+      makeTableRow (postId, postTitle, postUrl, postSubmitter, vote) =
+        tr_ $ do
+          td_ $ code_ $ toHtml postId
+          td_ $ a_ [href_ postUrl] (toHtml postTitle)
+          td_ $ toHtml $ "/u/" <> postSubmitter
+          td_ $ case vote of
+            1 -> "Yes"
+            0 -> "No"
+            _ -> error "Vote that wasn't 0 or 1 found: this should not happen!"
+  headHtml (Just "Your votes")
+  body_ $ main_ $ do
+    h1_ "Your votes"
+    p_ $ i_ $ a_ [href_ "/contribute"] "(back to contributing page)"
+    p_ $ b_ $ do
+      "You are now logged in as: /u/"
+      toHtml username
+    case votes of
+      [] -> p_ "You have not labelled any posts yet."
+      _ -> do
+        p_ $ do
+          "Here are all the posts you have labelled so far (most recent on top). "
+          "Thank you so much for your help!"
+        p_ $ do
+          "If you find you need to change or delete any of your votes, please get in touch with me."
+        table_ $ do
+          thead_ $ do
+            tr_ $ do
+              th_ "Post ID"
+              th_ "Post title"
+              th_ "Submitter"
+              th_ "Your vote"
+          tbody_ $ do
+            mapM_ makeTableRow votes
 
 -- | Thread for the web server
 web :: MVar () -> IO ()
@@ -433,3 +476,26 @@ web lock = do
               -- Serve HTML
               S.html $ renderText $ html_ $ do
                 contributingLoggedInHtml username nLabelled nextPost
+
+    S.get "/your_votes" $ do
+      maybeEnv <- retrieveRedditEnv dbRef
+      case maybeEnv of
+        -- User is not logged in
+        Nothing -> do
+          S.redirect "/contribute"
+
+        -- User is logged in
+        Just env -> do
+          usernameEither <- liftIO $ try $ runRedditT' env (accountUsername <$> myAccount)
+          case usernameEither of
+            Left e -> do
+              cleanup dbRef
+              S.html $ renderText $ errorHtml e
+            Right username -> do
+              -- Get data from database
+              sql <- liftIO $ getDataFileName (dbFileName config) >>= open
+              votes <- liftIO $ getAllVotesBy username sql
+              liftIO $ close sql
+              -- Serve HTML
+              S.html $ renderText $ html_ $ do
+                yourVotesHtml username votes
