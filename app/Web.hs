@@ -184,14 +184,16 @@ mainHtml = do
           " If you’re interested, its source code is on "
           a_ [href_ "https://github.com/penelopeysm/apribot"] "GitHub"
           ". (Issues and pull requests are welcome!) "
-          "If you have any questions about ApriBot, feel free to get in touch with me, either via GitHub or "
+          "If you have any questions about ApriBot, feel free to get in touch with me, either via "
+          a_ [href_ "https://github.com/penelopeysm/apribot"] "GitHub"
+          " or "
           a_ [href_ "https://reddit.com/u/is_a_togekiss"] "Reddit"
           "."
         p_ $ do
           b_ "I am currently looking for people to help me improve ApriBot's hit-detection algorithm."
-          " If you are interested and have a few minutes to spare, head over to the "
+          " If you are interested and have a few minutes to spare, do head over to the "
           a_ [href_ "/contribute"] "contribute page"
-          ". I will be very grateful!"
+          "—I will be very grateful!"
       h2_ "Hits"
       if null hits
         then p_ "None so far!"
@@ -227,13 +229,23 @@ privacyHtml = do
       "("
       a_ [href_ "/contribute"] "back to contribute page"
       ")"
+    h2_ "Personal information"
     p_ $ do
       "The only personal information ApriBot stores about you is your Reddit username (on posts which you have labelled). "
       "This information is required to make sure that you are not asked to label the same post twice. "
       "It is not shared with anybody else, and your votes can only be viewed by you. "
-      "ApriBot uses a single cookie to log you into Reddit and to store your login status, but otherwise does not perform any other tracking. "
-      "The source code of ApriBot can be viewed on "
+    h2_ "Cookies"
+    p_ $ do
+      "ApriBot uses one cookie to log you into Reddit securely (using OAuth), and another to store your login status so that you don't have to keep logging in, but otherwise does not perform any other tracking. "
+      "If you want to verify this, the source code of ApriBot can be viewed on "
       a_ [href_ "https://github.com/penelopeysm/apribot"] "GitHub"
+      "."
+    h2_ "Contact me..."
+    p_ $ do
+      "...via "
+      a_ [href_ "https://github.com/penelopeysm/apribot"] "GitHub"
+      " or "
+      a_ [href_ "https://reddit.com/u/is_a_togekiss"] "Reddit"
       "."
 
 authErrorHtml :: Html ()
