@@ -1,4 +1,4 @@
-FROM penelopeysm/apribot-dependencies:0.1
+FROM penelopeysm/apribot-dependencies
 WORKDIR /
 COPY . .
 
