@@ -509,6 +509,9 @@ web lock = do
               S.html $ renderText $ html_ $ do
                 contributingLoggedInHtml username nLabelled nextPost
 
+    S.get "/privacy" $ do
+      S.html $ renderText $ html_ privacyHtml
+
     S.get "/your_votes" $ do
       maybeEnv <- retrieveRedditEnv dbRef
       case maybeEnv of
