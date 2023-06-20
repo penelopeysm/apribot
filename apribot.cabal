@@ -67,8 +67,7 @@ executable apribot
     other-modules:    Paths_apribot, Web, Config, Utils, Database
 
     -- Data files, see https://cabal.readthedocs.io/en/3.4/cabal-package.html#accessing-data-files-from-package-code
-    data-files:       data/test.db
-                      static/styles.css
+    data-files:       data/posts.db, static/styles.css
 
     -- Other library packages from which modules are imported.
     build-depends:    base ^>=4.17.0.0,
