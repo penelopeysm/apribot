@@ -129,8 +129,8 @@ makeTableRowFromSql (pid, purl, ptitle, psubmitter, ptime, pflair) =
       ]
 
 -- | Reusable <head> element lead element for HTML page
-headHtml :: Maybe Text -> Html ()
-headHtml titleExtra = do
+headHtml :: Maybe Text -> Bool -> Html ()
+headHtml titleExtra withJS = do
   head_ $ do
     title_ $ toHtml (maybe "ApriBot" ("ApriBot :: " <>) titleExtra)
     link_ [rel_ "stylesheet", href_ "static/styles.css"]
@@ -138,11 +138,14 @@ headHtml titleExtra = do
     link_ [rel_ "icon", type_ "image/png", sizes_ "32x32", href_ "static/favicon-32x32.png"]
     link_ [rel_ "icon", type_ "image/png", sizes_ "16x16", href_ "static/favicon-16x16.png"]
     link_ [rel_ "manifest", href_ "static/site.webmanifest"]
+    if withJS
+      then script_ [src_ "static/enableButton.js", type_ "module"] ("" :: Text)
+      else mempty
 
 -- | Error HTML
 errorHtml :: SomeException -> Html ()
 errorHtml e = do
-  headHtml (Just "Error")
+  headHtml (Just "Error") False
   body_ $ do
     h1_ "An error occurred :("
     p_ $ do
@@ -165,8 +168,8 @@ mainHtml = do
   m <- getTotalHits sql
   close sql
 
-  pure $ html_ $ do
-    headHtml Nothing
+  pure $ doctypehtml_ $ do
+    headHtml Nothing False
     body_ $ main_ $ do
       h1_ "ApriBot"
       div_ [class_ "prose"] $ do
@@ -209,7 +212,7 @@ mainHtml = do
 
 logoutHtml :: Html ()
 logoutHtml = do
-  headHtml (Just "Logged out")
+  headHtml (Just "Logged out") False
   body_ $ main_ $ do
     h1_ "Logged out"
     p_ "You have been logged out. Thank you so much for your time!"
@@ -222,7 +225,7 @@ logoutHtml = do
 
 privacyHtml :: Html ()
 privacyHtml = do
-  headHtml (Just "Privacy")
+  headHtml (Just "Privacy") False
   body_ $ main_ $ do
     h1_ "Privacy"
     p_ $ i_ $ do
@@ -250,7 +253,7 @@ privacyHtml = do
 
 authErrorHtml :: Html ()
 authErrorHtml = do
-  headHtml (Just "Error")
+  headHtml (Just "Error") False
   body_ $ main_ $ do
     h1_ "Authentication error :("
     p_ $ do
@@ -260,7 +263,7 @@ authErrorHtml = do
 
 contribErrorHtml :: Html ()
 contribErrorHtml = do
-  headHtml (Just "Error")
+  headHtml (Just "Error") False
   body_ $ main_ $ do
     h1_ "Form submission error :("
     p_ $ do
@@ -269,7 +272,7 @@ contribErrorHtml = do
 
 contributingLoggedOutHtml :: Text -> Html ()
 contributingLoggedOutHtml redditUrl = do
-  headHtml (Just "Contributing")
+  headHtml (Just "Contributing") False
   body_ $ main_ $ do
     h1_ "Contribute"
     p_ $ i_ $ do
@@ -291,8 +294,11 @@ contributingLoggedOutHtml redditUrl = do
       b_ $ a_ [href_ redditUrl] "log in with Reddit"
       "."
     p_ $ do
-      "The permissions I am requesting do not give me access any of your personal information, apart from your Reddit username and the time you created your account. "
-      "I only need this to make sure that you don't label the same post multiple times."
+      b_ "ApriBot uses cookies only to log you in and to keep you logged in. "
+      b_ "By logging in, it is assumed that you consent to this. "
+      "See the "
+      a_ [href_ "/privacy"] "privacy page"
+      " for more information."
 
 contributingLoggedInHtml ::
   Text ->
@@ -300,7 +306,7 @@ contributingLoggedInHtml ::
   Maybe (Text, Text, Text, Text, Text, Text, Text) ->
   Html ()
 contributingLoggedInHtml username nLabelled nextPost = do
-  headHtml (Just "Contributing")
+  headHtml (Just "Contributing") True
   body_ $ main_ $ do
     h1_ "Contribute"
     p_ $ i_ $ do
@@ -332,13 +338,13 @@ contributingLoggedInHtml username nLabelled nextPost = do
         Just (postId, postUrl, postTitle, postBody, postSubmitter, postTime, postFlair) -> do
           div_ [class_ "form-container"] $ do
             form_ [class_ "aprimon-question", action_ "/contribute", method_ "post"] $ do
-              span_ $ b_ "Is the post below related?"
+              span_ $ b_ "Is the post below offering, or looking for, breedable Aprimon?"
               input_ [type_ "hidden", name_ "id", value_ postId]
               input_ [type_ "hidden", name_ "username", value_ username]
-              button_ [type_ "submit", name_ "vote", value_ "1"] "Yes"
-              button_ [type_ "submit", name_ "vote", value_ "0"] "No"
+              button_ [type_ "submit", name_ "vote", value_ "1", disabled_ ""] "Yes"
+              button_ [type_ "submit", name_ "vote", value_ "0", disabled_ ""] "No"
           div_ $ do
-            span_ [class_ "title"] $ toHtml postTitle
+            span_ [class_ "title"] $ toHtmlRaw postTitle
             span_ [class_ "boxed-flair"] $ toHtml postFlair
           ul_ $ do
             li_ $ toHtml (printf "Submitted by /u/%s at %s UTC" postSubmitter postTime :: String)
@@ -363,7 +369,7 @@ yourVotesHtml username votes = do
             1 -> "Yes"
             0 -> "No"
             _ -> error "Vote that wasn't 0 or 1 found: this should not happen!"
-  headHtml (Just "Your votes")
+  headHtml (Just "Your votes") False
   body_ $ main_ $ do
     h1_ "Your votes"
     p_ $ i_ $ do
@@ -442,15 +448,19 @@ web lock = do
       S.setHeader "Content-Type" "image/x-png"
       S.file (staticDir <> "/" <> "android-chrome-512x512.png")
 
+    S.get "/static/enableButton.js" $ do
+      S.setHeader "Content-Type" "text/javascript"
+      S.file (staticDir <> "/" <> "enableButton.js")
+
     S.get "/authorised" $ do
       makeNewRedditEnv clientId clientSecret (redirectUri config) dbRef
       S.redirect "/contribute"
 
     S.get "/auth_error" $ do
-      S.html $ renderText $ html_ authErrorHtml
+      S.html $ renderText $ doctypehtml_ authErrorHtml
 
     S.get "/contrib_error" $ do
-      S.html $ renderText $ html_ contribErrorHtml
+      S.html $ renderText $ doctypehtml_ contribErrorHtml
 
     S.get "/logout" $ do
       -- Remove token from database
@@ -459,7 +469,7 @@ web lock = do
         Nothing -> S.redirect "/"
         Just _ -> do
           cleanup dbRef
-          S.html $ renderText $ html_ logoutHtml
+          S.html $ renderText $ doctypehtml_ logoutHtml
 
     S.post "/contribute" $ do
       mPostId :: Maybe Text <- (Just <$> S.param "id") `S.rescue` const (pure Nothing)
@@ -493,7 +503,7 @@ web lock = do
                 C.setCookieSameSite = Just C.sameSiteLax,
                 C.setCookieMaxAge = Just (secondsToDiffTime 600)
               }
-          S.html $ renderText $ html_ $ do
+          S.html $ renderText $ doctypehtml_ $ do
             contributingLoggedOutHtml $
               mkRedditAuthURL $
                 AuthUrlParams
@@ -518,11 +528,11 @@ web lock = do
               nextPost <- liftIO $ getNextUnlabelledPost sql
               liftIO $ close sql
               -- Serve HTML
-              S.html $ renderText $ html_ $ do
+              S.html $ renderText $ doctypehtml_ $ do
                 contributingLoggedInHtml username nLabelled nextPost
 
     S.get "/privacy" $ do
-      S.html $ renderText $ html_ privacyHtml
+      S.html $ renderText $ doctypehtml_ privacyHtml
 
     S.get "/your_votes" $ do
       maybeEnv <- retrieveRedditEnv dbRef
@@ -544,5 +554,5 @@ web lock = do
               votes <- liftIO $ getAllVotesBy username sql
               liftIO $ close sql
               -- Serve HTML
-              S.html $ renderText $ html_ $ do
+              S.html $ renderText $ doctypehtml_ $ do
                 yourVotesHtml username votes
