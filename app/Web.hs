@@ -1,6 +1,7 @@
 module Web (web) where
 
 import CMarkGFM
+import Text.HTML.SanitizeXSS (sanitizeBalance)
 import Config
 import Control.Applicative (liftA2)
 import Control.Concurrent (MVar)
@@ -125,7 +126,7 @@ makeTableRowFromSql (pid, purl, ptitle, psubmitter, ptime, pflair) =
         toHtml ptime,
         toHtml ("/u/" <> psubmitter),
         toHtml pflair,
-        a_ [href_ purl] $ toHtmlRaw ptitle
+        a_ [href_ purl] $ toHtmlRaw $ sanitizeBalance $ ptitle
       ]
 
 -- | Reusable <head> element lead element for HTML page
@@ -345,7 +346,7 @@ contributingLoggedInHtml username nLabelled nextPost = do
               button_ [type_ "submit", name_ "vote", value_ "0", disabled_ ""] "No"
               button_ [type_ "submit", name_ "vote", value_ "2", disabled_ ""] "Skip"
           div_ $ do
-            span_ [class_ "title"] $ toHtmlRaw postTitle
+            span_ [class_ "title"] $ toHtmlRaw $ sanitizeBalance $ postTitle
             span_ [class_ "boxed-flair"] $ toHtml postFlair
           ul_ $ do
             li_ $ toHtml (printf "Submitted by /u/%s at %s UTC" postSubmitter postTime :: String)
@@ -364,7 +365,7 @@ yourVotesHtml username votes = do
       makeTableRow (postId, postTitle, postUrl, postSubmitter, vote) =
         tr_ $ do
           td_ $ code_ $ toHtml postId
-          td_ $ a_ [href_ postUrl] (toHtmlRaw postTitle)
+          td_ $ a_ [href_ postUrl] (toHtmlRaw $ sanitizeBalance postTitle)
           td_ $ toHtml $ "/u/" <> postSubmitter
           td_ $ case vote of
             1 -> "Yes"
