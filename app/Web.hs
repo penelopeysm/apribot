@@ -125,7 +125,7 @@ makeTableRowFromSql (pid, purl, ptitle, psubmitter, ptime, pflair) =
         toHtml ptime,
         toHtml ("/u/" <> psubmitter),
         toHtml pflair,
-        a_ [href_ purl] $ toHtml ptitle
+        a_ [href_ purl] $ toHtmlRaw ptitle
       ]
 
 -- | Reusable <head> element lead element for HTML page
@@ -364,7 +364,7 @@ yourVotesHtml username votes = do
       makeTableRow (postId, postTitle, postUrl, postSubmitter, vote) =
         tr_ $ do
           td_ $ code_ $ toHtml postId
-          td_ $ a_ [href_ postUrl] (toHtml postTitle)
+          td_ $ a_ [href_ postUrl] (toHtmlRaw postTitle)
           td_ $ toHtml $ "/u/" <> postSubmitter
           td_ $ case vote of
             1 -> "Yes"
