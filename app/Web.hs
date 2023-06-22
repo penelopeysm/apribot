@@ -338,11 +338,12 @@ contributingLoggedInHtml username nLabelled nextPost = do
         Just (postId, postUrl, postTitle, postBody, postSubmitter, postTime, postFlair) -> do
           div_ [class_ "form-container"] $ do
             form_ [class_ "aprimon-question", action_ "/contribute", method_ "post"] $ do
-              span_ $ b_ "Is the post below offering, or looking for, breedable Aprimon?"
+              span_ $ b_ "Is the post below offering, or looking for, non-shiny breedable Aprimon?"
               input_ [type_ "hidden", name_ "id", value_ postId]
               input_ [type_ "hidden", name_ "username", value_ username]
               button_ [type_ "submit", name_ "vote", value_ "1", disabled_ ""] "Yes"
               button_ [type_ "submit", name_ "vote", value_ "0", disabled_ ""] "No"
+              button_ [type_ "submit", name_ "vote", value_ "2", disabled_ ""] "Skip"
           div_ $ do
             span_ [class_ "title"] $ toHtmlRaw postTitle
             span_ [class_ "boxed-flair"] $ toHtml postFlair
@@ -476,15 +477,18 @@ web lock = do
       mVoter :: Maybe Text <- (Just <$> S.param "username") `S.rescue` const (pure Nothing)
       mVote :: Maybe Int <- (Just <$> S.param "vote") `S.rescue` const (pure Nothing)
       case (mPostId, mVoter, mVote) of
-        (Just postId, Just voter, Just vote) -> do
-          liftIO $ atomically lock $ do
-            putStrLn $ printf "Received vote from /u/%s on post %s: %d" voter postId vote
-            sql <- getDataFileName (dbFileName config) >>= open
-            addVote postId voter vote sql
-            n <- getNumVotes sql
-            close sql
-            putStrLn $ printf "Total number of votes: %d" n
-          S.redirect "/contribute"
+        (Just postId, Just voter, Just vote) ->
+          if vote /= 0 && vote /= 1
+             then S.redirect "/contribute"
+             else do
+                liftIO $ atomically lock $ do
+                  putStrLn $ printf "Received vote from /u/%s on post %s: %d" voter postId vote
+                  sql <- getDataFileName (dbFileName config) >>= open
+                  addVote postId voter vote sql
+                  n <- getNumVotes sql
+                  close sql
+                  putStrLn $ printf "Total number of votes: %d" n
+                S.redirect "/contribute"
         _ -> S.redirect "/contrib_error"
 
     S.get "/contribute" $ do

@@ -55,6 +55,7 @@ form.aprimon-question {
   border: 2px solid black;
   border-radius: 5px;
   background-color: #ffd9f2;
+  align-items: center;
 }
 
 button {
