@@ -1,7 +1,6 @@
 module Web (web) where
 
 import CMarkGFM
-import Text.HTML.SanitizeXSS (sanitizeBalance)
 import Config
 import Control.Applicative (liftA2)
 import Control.Concurrent (MVar)
@@ -13,6 +12,7 @@ import Data.Password.Bcrypt
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Lazy (fromStrict)
 import Data.Time.Clock (secondsToDiffTime)
 import Database
 import Database.SQLite.Simple
@@ -20,6 +20,7 @@ import Lucid
 import Paths_apribot (getDataFileName)
 import Reddit
 import Reddit.Auth (Token (..))
+import Text.HTML.SanitizeXSS (sanitizeBalance)
 import Text.Printf (printf)
 import Utils
 import qualified Web.Cookie as C
@@ -35,21 +36,21 @@ tokenCookieName = "apribotToken"
 -- * Storage of OAuth2 tokens in memory
 
 -- TODO: Deal with tokens which have expired
-type Database = M.Map Text Token
+type TokenStore = M.Map Text Token
 
-addToTokenDb :: Text -> Token -> IORef Database -> IO ()
-addToTokenDb userSessionId authToken dbRef = do
+addToTokenStore :: Text -> Token -> IORef TokenStore -> IO ()
+addToTokenStore userSessionId authToken dbRef = do
   atomicModifyIORef' dbRef (\db -> (M.insert userSessionId authToken db, ()))
 
-removeFromTokenDb :: Text -> IORef Database -> IO ()
-removeFromTokenDb userSessionId dbRef = do
+removeFromTokenStore :: Text -> IORef TokenStore -> IO ()
+removeFromTokenStore userSessionId dbRef = do
   atomicModifyIORef' dbRef (\db -> (M.delete userSessionId db, ()))
 
 -- * Generating RedditEnv values to use
 
 -- | Retrieve token-identifier cookie, and thus the token from the database, if
 -- the user has one.
-retrieveRedditEnv :: IORef Database -> S.ActionM (Maybe RedditEnv)
+retrieveRedditEnv :: IORef TokenStore -> S.ActionM (Maybe RedditEnv)
 retrieveRedditEnv dbRef = do
   db <- liftIO $ readIORef dbRef
   maybeCookie <- SC.getCookie tokenCookieName
@@ -62,7 +63,7 @@ retrieveRedditEnv dbRef = do
 -- granting access on Reddit (i.e. the URI query params contains an
 -- authorisation code which can be used to request an access token). If the
 -- params are not present then this redirects the user back to "/".
-makeNewRedditEnv :: Text -> Text -> Text -> IORef Database -> S.ActionM ()
+makeNewRedditEnv :: Text -> Text -> Text -> IORef TokenStore -> S.ActionM ()
 makeNewRedditEnv clientId clientSecret redirectUri dbRef = do
   -- Retrieve stored state from the cookie
   hashedState <- fmap PasswordHash <$> SC.getCookie hashedStateCookieName
@@ -95,18 +96,18 @@ makeNewRedditEnv clientId clientSecret redirectUri dbRef = do
             C.setCookieSecure = True
           }
       -- Store the token in the 'database' using this session ID
-      liftIO $ addToTokenDb sessionId t dbRef
+      liftIO $ addToTokenStore sessionId t dbRef
     _ -> do
       S.redirect "auth_error"
 
 -- | Deletes all cookies and the corresponding token from the database (if it
 -- exists)
-cleanup :: IORef Database -> S.ActionM ()
+cleanup :: IORef TokenStore -> S.ActionM ()
 cleanup dbRef = do
   maybeCookie <- SC.getCookie tokenCookieName
   case maybeCookie of
     Just cookie -> do
-      liftIO $ removeFromTokenDb cookie dbRef
+      liftIO $ removeFromTokenStore cookie dbRef
       SC.deleteCookie tokenCookieName
       SC.deleteCookie hashedStateCookieName
     Nothing -> pure ()
@@ -162,12 +163,13 @@ errorHtml e = do
 -- | HTML for the main page
 mainHtml :: IO (Html ())
 mainHtml = do
-  sql <- getDataFileName (dbFileName config) >>= open
-  hits <- getLatestHits 50 sql
-  nonhits <- getLatestNonHits 50 sql
-  n <- getTotalRows sql
-  m <- getTotalHits sql
-  close sql
+  sqlFileName <- getSqlFileName
+  (hits, nonhits, n, m) <- liftIO $ withConnection sqlFileName $ \sql -> do
+    hits <- getLatestHits 50 sql
+    nonhits <- getLatestNonHits 50 sql
+    n <- getTotalRows sql
+    m <- getTotalHits sql
+    pure (hits, nonhits, n, m)
 
   pure $ doctypehtml_ $ do
     headHtml Nothing False
@@ -271,8 +273,8 @@ contribErrorHtml = do
       "Sorry! There was an error recording your vote. "
     p_ $ a_ [href_ "/contribute"] "Please try again, and let me know if it still doesn't work."
 
-contributingLoggedOutHtml :: Text -> Html ()
-contributingLoggedOutHtml redditUrl = do
+contributingLoggedOutHtml :: Int -> Int -> Html ()
+contributingLoggedOutHtml totalPosts labelledPosts = do
   headHtml (Just "Contributing") False
   body_ $ main_ $ do
     h1_ "Contribute"
@@ -289,11 +291,14 @@ contributingLoggedOutHtml redditUrl = do
       "However, to do this, I need "
       i_ "labelled data"
       ": that is, a number of posts which have been manually classified (by experts—yes, that's you!) as being either Aprimon-related or not. "
-      "If you have a few minutes to spare, please consider helping me out by labelling some posts."
-    p_ $ do
-      "To do this, you will need to "
-      b_ $ a_ [href_ redditUrl] "log in with Reddit"
-      "."
+      "Right now, out of a total of "
+      toHtml (show totalPosts)
+      " posts, "
+      toHtml (show labelledPosts)
+      " have been labelled. "
+      "If you have a few minutes to spare, please consider helping me out by increasing this number!"
+    div_ [id_ "login-link-container"] $ do
+      a_ [href_ "/login", id_ "login-link"] $ "Log in with Reddit"
     p_ $ do
       b_ "ApriBot uses cookies only to log you in and to keep you logged in. "
       b_ "By logging in, it is assumed that you consent to this. "
@@ -464,6 +469,34 @@ web lock = do
     S.get "/contrib_error" $ do
       S.html $ renderText $ doctypehtml_ contribErrorHtml
 
+    S.get "/login" $ do
+      maybeEnv <- retrieveRedditEnv dbRef
+      case maybeEnv of
+        Just _ -> S.redirect "/contribute"
+        Nothing -> do
+          -- Generate a random state for the user, and store it as a cookie
+          state <- liftIO $ randomText 40
+          hash <- liftIO $ unPasswordHash <$> hashPassword (mkPassword state)
+          let stateCookie = SC.makeSimpleCookie hashedStateCookieName hash
+          SC.setCookie $
+            stateCookie
+              { C.setCookieHttpOnly = True,
+                C.setCookieSecure = True,
+                C.setCookieSameSite = Just C.sameSiteLax,
+                C.setCookieMaxAge = Just (secondsToDiffTime 600)
+              }
+          -- Redirect to Reddit's auth page
+          S.redirect $
+            fromStrict $
+              mkRedditAuthURL $
+                AuthUrlParams
+                  { authUrlClientID = clientId,
+                    authUrlState = Just state,
+                    authUrlRedirectUri = redirectUri config,
+                    authUrlDuration = Temporary,
+                    authUrlScopes = Set.singleton ScopeIdentity
+                  }
+
     S.get "/logout" $ do
       -- Remove token from database
       maybeCookie <- SC.getCookie tokenCookieName
@@ -480,16 +513,11 @@ web lock = do
       case (mPostId, mVoter, mVote) of
         (Just postId, Just voter, Just vote) ->
           if vote /= 0 && vote /= 1
-             then S.redirect "/contribute"
-             else do
-                liftIO $ atomically lock $ do
-                  putStrLn $ printf "Received vote from /u/%s on post %s: %d" voter postId vote
-                  sql <- getDataFileName (dbFileName config) >>= open
-                  addVote postId voter vote sql
-                  n <- getNumVotes sql
-                  close sql
-                  putStrLn $ printf "Total number of votes: %d" n
-                S.redirect "/contribute"
+            then S.redirect "/contribute"
+            else do
+              sqlFileName <- getSqlFileName
+              liftIO $ withConnection sqlFileName $ addVote postId voter vote
+              S.redirect "/contribute"
         _ -> S.redirect "/contrib_error"
 
     S.get "/contribute" $ do
@@ -497,28 +525,11 @@ web lock = do
       case maybeEnv of
         -- User is not logged in
         Nothing -> do
-          -- Generate a random state for the user, and store it as a cookie
-          state <- liftIO $ randomText 40
-          hash <- liftIO $ unPasswordHash <$> hashPassword (mkPassword state)
-          let stateCookie = SC.makeSimpleCookie hashedStateCookieName hash
-          SC.setCookie $
-            stateCookie
-              { C.setCookieHttpOnly = True,
-                C.setCookieSecure = True,
-                C.setCookieSameSite = Just C.sameSiteLax,
-                C.setCookieMaxAge = Just (secondsToDiffTime 600)
-              }
+          sqlFileName <- getSqlFileName
+          (totalPosts, labelledPosts) <- liftIO $ withConnection sqlFileName $ \sql -> do
+            (,) <$> getTotalRows sql <*> getTotalNumberLabelled sql
           S.html $ renderText $ doctypehtml_ $ do
-            contributingLoggedOutHtml $
-              mkRedditAuthURL $
-                AuthUrlParams
-                  { authUrlClientID = clientId,
-                    authUrlState = Just state,
-                    authUrlRedirectUri = redirectUri config,
-                    authUrlDuration = Temporary,
-                    authUrlScopes = Set.singleton ScopeIdentity
-                  }
-
+            contributingLoggedOutHtml totalPosts labelledPosts
         -- User is logged in
         Just env -> do
           usernameEither <- liftIO $ try $ runRedditT' env (accountUsername <$> myAccount)
@@ -528,10 +539,9 @@ web lock = do
               S.html $ renderText $ errorHtml e
             Right username -> do
               -- Get data from database
-              sql <- liftIO $ getDataFileName (dbFileName config) >>= open
-              nLabelled <- liftIO $ getNumberLabelled username sql
-              nextPost <- liftIO $ getNextUnlabelledPost sql
-              liftIO $ close sql
+              sqlFileName <- getSqlFileName
+              (nLabelled, nextPost) <- liftIO $ withConnection sqlFileName $ \sql -> do
+                (,) <$> getNumberLabelledBy username sql <*> getNextUnlabelledPost sql
               -- Serve HTML
               S.html $ renderText $ doctypehtml_ $ do
                 contributingLoggedInHtml username nLabelled nextPost
@@ -555,9 +565,8 @@ web lock = do
               S.html $ renderText $ errorHtml e
             Right username -> do
               -- Get data from database
-              sql <- liftIO $ getDataFileName (dbFileName config) >>= open
-              votes <- liftIO $ getAllVotesBy username sql
-              liftIO $ close sql
+              sqlFileName <- getSqlFileName
+              votes <- liftIO $ withConnection sqlFileName $ getAllVotesBy username
               -- Serve HTML
               S.html $ renderText $ doctypehtml_ $ do
                 yourVotesHtml username votes

@@ -1,8 +1,14 @@
 /* Google Fonts */
 @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400&family=Nunito+Sans:ital,wght@0,400;0,700;1,400;1,700&display=swap');
 
+:root {
+  --light-blue: #f2f8fa;
+  --less-light-blue: #bbe7f0;
+  --pink: #ffd9f2;
+}
+
 th {
-  background-color: #bbe7f0;
+  background-color: var(--less-light-blue);
 }
 
 th {
@@ -29,7 +35,7 @@ body {
   margin: 40px;
   font-family: 'Nunito Sans', sans-serif;
   line-height: 1.6;
-  background-color: #f2f8fa;
+  background-color: var(--light-blue);
 }
 
 main {
@@ -54,7 +60,7 @@ form.aprimon-question {
   padding: 10px;
   border: 2px solid black;
   border-radius: 5px;
-  background-color: #ffd9f2;
+  background-color: var(--pink);
   align-items: center;
 }
 
@@ -78,4 +84,24 @@ span.boxed-flair {
 
 div.post-body {
   padding: 0px 20px;
+}
+
+div#login-link-container {
+  display: flex;
+  justify-content: center;
+  margin-top: 20px;
+  margin-bottom: 20px;
+}
+
+a#login-link {
+  font-weight: bold;
+  font-size: 120%;
+  padding: 5px 12px;
+  border: 2px solid black;
+  border-radius: 5px;
+  box-shadow: 2px 2px 2px #888888;
+}
+
+a#login-link:hover {
+  background-color: var(--less-light-blue);
 }

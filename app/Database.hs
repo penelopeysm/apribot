@@ -25,7 +25,8 @@ module Database
     getLatestNonHits,
     getTotalRows,
     getTotalHits,
-    getNumberLabelled,
+    getTotalNumberLabelled,
+    getNumberLabelledBy,
     getNextUnlabelledPost,
     addVote,
     getNumVotes,
@@ -86,8 +87,13 @@ getTotalHits conn =
   fromOnly . head
     <$> query_ conn "SELECT COUNT(*) FROM posts WHERE hit = 1;"
 
-getNumberLabelled :: Text -> Connection -> IO Int
-getNumberLabelled username conn =
+getTotalNumberLabelled :: Connection -> IO Int
+getTotalNumberLabelled conn =
+  fromOnly . head
+    <$> query_ conn "SELECT COUNT(DISTINCT id) FROM votes;"
+
+getNumberLabelledBy :: Text -> Connection -> IO Int
+getNumberLabelledBy username conn =
   fromOnly . head
     <$> query_ conn (Query . T.pack $ printf "SELECT COUNT(*) FROM votes WHERE username = '%s';" username)
 

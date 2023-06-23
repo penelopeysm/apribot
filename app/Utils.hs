@@ -1,8 +1,11 @@
-module Utils (atomically, getEnvAsText, markdownEscape, randomText) where
+module Utils (atomically, getEnvAsText, markdownEscape, randomText, getSqlFileName) where
 
+import Config
 import Control.Concurrent (MVar, withMVar)
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Paths_apribot (getDataFileName)
 import System.Environment (getEnv)
 import System.Random
 
@@ -25,3 +28,6 @@ chars = ['a' .. 'z'] ++ ['A' .. 'Z'] ++ ['0' .. '9']
 randomText :: Int -> IO Text
 randomText len = do
   T.pack . map (chars !!) . take len . randomRs (0, length chars - 1) <$> initStdGen
+
+getSqlFileName :: (MonadIO m) => m String
+getSqlFileName = liftIO $ getDataFileName (dbFileName config)
