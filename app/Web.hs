@@ -347,11 +347,12 @@ contributingLoggedInHtml username nLabelled nextPost = do
               span_ $ b_ "Is the post below offering, or looking for, non-shiny breedable Aprimon?"
               input_ [type_ "hidden", name_ "id", value_ postId]
               input_ [type_ "hidden", name_ "username", value_ username]
-              button_ [type_ "submit", name_ "vote", value_ "1", disabled_ ""] "Yes"
-              button_ [type_ "submit", name_ "vote", value_ "0", disabled_ ""] "No"
-              button_ [type_ "submit", name_ "vote", value_ "2", disabled_ ""] "Skip"
+              div_ [id_ "button-container"] $ do
+                button_ [type_ "submit", name_ "vote", value_ "1", disabled_ ""] "✅ Yes"
+                button_ [type_ "submit", name_ "vote", value_ "0", disabled_ ""] "❌ No"
+                button_ [type_ "submit", name_ "vote", value_ "2", disabled_ ""] "⏭️ Skip"
           div_ $ do
-            span_ [class_ "title"] $ toHtmlRaw $ sanitizeBalance $ postTitle
+            span_ [class_ "title"] $ toHtmlRaw $ sanitizeBalance postTitle
             span_ [class_ "boxed-flair"] $ toHtml postFlair
           ul_ $ do
             li_ $ toHtml (printf "Submitted by /u/%s at %s UTC" postSubmitter postTime :: String)
