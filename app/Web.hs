@@ -410,6 +410,13 @@ yourVotesHtml username votes = do
           tbody_ $ do
             mapM_ makeTableRow votes
 
+maintenanceHtml :: Html ()
+maintenanceHtml = doctypehtml_ $ do
+  headHtml (Just "Maintenance") False
+  body_ $ main_ $ do
+    h1_ "Maintenance"
+    p_ "ApriBot is under maintenance now. Please check back in 15 minutes."
+
 -- | Thread for the web server
 web :: MVar () -> IO ()
 web lock = do
@@ -420,9 +427,6 @@ web lock = do
   atomically lock $ printf "Launching web server on port %d...\n" (port config)
 
   S.scotty (port config) $ do
-    S.get "/" $ do
-      liftIO mainHtml >>= S.html . renderText
-
     S.get "/static/styles.css" $ do
       S.setHeader "Content-Type" "text/css"
       S.file (staticDir <> "/" <> "styles.css")
@@ -455,118 +459,8 @@ web lock = do
       S.setHeader "Content-Type" "image/x-png"
       S.file (staticDir <> "/" <> "android-chrome-512x512.png")
 
-    S.get "/static/enableButton.js" $ do
-      S.setHeader "Content-Type" "text/javascript"
-      S.file (staticDir <> "/" <> "enableButton.js")
+    S.get "/" $ do
+      S.html $ renderText maintenanceHtml
 
-    S.get "/authorised" $ do
-      makeNewRedditEnv clientId clientSecret (redirectUri config) dbRef
-      S.redirect "/contribute"
-
-    S.get "/auth_error" $ do
-      S.html $ renderText $ doctypehtml_ authErrorHtml
-
-    S.get "/contrib_error" $ do
-      S.html $ renderText $ doctypehtml_ contribErrorHtml
-
-    S.get "/login" $ do
-      maybeEnv <- retrieveRedditEnv dbRef
-      case maybeEnv of
-        Just _ -> S.redirect "/contribute"
-        Nothing -> do
-          -- Generate a random state for the user, and store it as a cookie
-          state <- liftIO $ randomText 40
-          hash <- liftIO $ unPasswordHash <$> hashPassword (mkPassword state)
-          let stateCookie = SC.makeSimpleCookie hashedStateCookieName hash
-          SC.setCookie $
-            stateCookie
-              { C.setCookieHttpOnly = True,
-                C.setCookieSecure = True,
-                C.setCookieSameSite = Just C.sameSiteLax,
-                C.setCookieMaxAge = Just (secondsToDiffTime 600)
-              }
-          -- Redirect to Reddit's auth page
-          S.redirect $
-            fromStrict $
-              mkRedditAuthURL $
-                AuthUrlParams
-                  { authUrlClientID = clientId,
-                    authUrlState = Just state,
-                    authUrlRedirectUri = redirectUri config,
-                    authUrlDuration = Temporary,
-                    authUrlScopes = Set.singleton ScopeIdentity
-                  }
-
-    S.get "/logout" $ do
-      -- Remove token from database
-      maybeCookie <- SC.getCookie tokenCookieName
-      case maybeCookie of
-        Nothing -> S.redirect "/"
-        Just _ -> do
-          cleanup dbRef
-          S.html $ renderText $ doctypehtml_ logoutHtml
-
-    S.post "/contribute" $ do
-      mPostId :: Maybe Text <- (Just <$> S.param "id") `S.rescue` const (pure Nothing)
-      mVoter :: Maybe Text <- (Just <$> S.param "username") `S.rescue` const (pure Nothing)
-      mVote :: Maybe Int <- (Just <$> S.param "vote") `S.rescue` const (pure Nothing)
-      case (mPostId, mVoter, mVote) of
-        (Just postId, Just voter, Just vote) ->
-          if vote /= 0 && vote /= 1
-            then S.redirect "/contribute"
-            else do
-              sqlFileName <- getSqlFileName
-              liftIO $ withConnection sqlFileName $ addVote postId voter vote
-              S.redirect "/contribute"
-        _ -> S.redirect "/contrib_error"
-
-    S.get "/contribute" $ do
-      maybeEnv <- retrieveRedditEnv dbRef
-      case maybeEnv of
-        -- User is not logged in
-        Nothing -> do
-          sqlFileName <- getSqlFileName
-          (totalPosts, labelledPosts) <- liftIO $ withConnection sqlFileName $ \sql -> do
-            (,) <$> getTotalRows sql <*> getTotalNumberLabelled sql
-          S.html $ renderText $ doctypehtml_ $ do
-            contributingLoggedOutHtml totalPosts labelledPosts
-        -- User is logged in
-        Just env -> do
-          usernameEither <- liftIO $ try $ runRedditT' env (accountUsername <$> myAccount)
-          case usernameEither of
-            Left e -> do
-              cleanup dbRef
-              S.html $ renderText $ errorHtml e
-            Right username -> do
-              -- Get data from database
-              sqlFileName <- getSqlFileName
-              (nLabelled, nextPost) <- liftIO $ withConnection sqlFileName $ \sql -> do
-                (,) <$> getNumberLabelledBy username sql <*> getNextUnlabelledPost sql
-              -- Serve HTML
-              S.html $ renderText $ doctypehtml_ $ do
-                contributingLoggedInHtml username nLabelled nextPost
-
-    S.get "/privacy" $ do
-      S.html $ renderText $ doctypehtml_ privacyHtml
-
-    S.get "/your_votes" $ do
-      maybeEnv <- retrieveRedditEnv dbRef
-      case maybeEnv of
-        -- User is not logged in
-        Nothing -> do
-          S.redirect "/contribute"
-
-        -- User is logged in
-        Just env -> do
-          usernameEither <- liftIO $ try $ runRedditT' env (accountUsername <$> myAccount)
-          case usernameEither of
-            Left e -> do
-              cleanup dbRef
-              S.html $ renderText $ errorHtml e
-            Right username -> do
-              -- Get data from database
-              sqlFileName <- getSqlFileName
-              votes <- liftIO $ withConnection sqlFileName $ getAllVotesBy username
-              -- Serve HTML
-              S.html $ renderText $ doctypehtml_ $ do
-                yourVotesHtml username votes
+    S.get "/:word" $ do
+      S.html $ renderText maintenanceHtml
