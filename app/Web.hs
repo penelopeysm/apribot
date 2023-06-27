@@ -275,8 +275,10 @@ contributingLoggedOutHtml totalPosts labelledPosts = do
       a_ [href_ "/privacy"] "privacy"
       ")"
     p_ $ do
-      "Right now, ApriBot uses a very primitive keyword-searching system for identifying Aprimon-related posts. "
-      "My goal is to eventually replace this with some sort of machine learning algorithm. "
+      "At the moment, ApriBot uses a very primitive keyword-searching system for identifying Aprimon-related posts. "
+      "My goal is to eventually replace this with "
+      a_ [href_ "https://github.com/penelopeysm/apriml"] "some sort of machine learning algorithm"
+      "."
     p_ $ do
       "However, to do this, I need "
       i_ "labelled data"
@@ -299,9 +301,11 @@ contributingLoggedOutHtml totalPosts labelledPosts = do
 contributingLoggedInHtml ::
   Text ->
   Int ->
+  Int ->
+  Int ->
   Maybe (Text, Text, Text, Text, Text, Text, Text) ->
   Html ()
-contributingLoggedInHtml username nLabelled nextPost = do
+contributingLoggedInHtml username totalPosts labelledPosts labelledPostsByUser nextPost = do
   headHtml (Just "Contributing") True
   body_ $ main_ $ do
     h1_ "Contribute"
@@ -319,12 +323,15 @@ contributingLoggedInHtml username nLabelled nextPost = do
       "You are now logged in as: /u/"
       toHtml username
     p_ $ do
-      " You have labelled a total of "
-      toHtml $ show nLabelled
-      " post"
-      if nLabelled == 1 then "." else "s."
-      if nLabelled > 0
-        then " Thank you so much! <3"
+      "Right now, out of a total of "
+      toHtml (show totalPosts)
+      " posts, "
+      toHtml (show labelledPosts)
+      " have been labelled. "
+      if labelledPostsByUser > 0
+        then do
+          toHtml $ show labelledPostsByUser
+          " of these were by you. Thank you so much! <3"
         else ""
       case nextPost of
         -- This is very optimistic...
@@ -530,11 +537,16 @@ web lock = do
             Right username -> do
               -- Get data from database
               sqlFileName <- getSqlFileName
-              (nLabelled, nextPost) <- liftIO $ withConnection sqlFileName $ \sql -> do
-                (,) <$> getNumberLabelledBy username sql <*> getNextUnlabelledPost sql
+              (totalPosts, labelledPosts, labelledPostsByUser, nextPost) <- liftIO $ withConnection sqlFileName $ \sql ->
+                do
+                  (,,,)
+                  <$> getTotalRows sql
+                  <*> getTotalNumberLabelled sql
+                  <*> getNumberLabelledBy username sql
+                  <*> getNextUnlabelledPost sql
               -- Serve HTML
               S.html $ renderText $ doctypehtml_ $ do
-                contributingLoggedInHtml username nLabelled nextPost
+                contributingLoggedInHtml username totalPosts labelledPosts labelledPostsByUser nextPost
 
     S.get "/privacy" $ do
       S.html $ renderText $ doctypehtml_ privacyHtml
