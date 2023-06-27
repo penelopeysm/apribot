@@ -7,6 +7,7 @@ import Text.Printf (printf)
 
 data Config = Config
   { dbFileName :: String,
+    tokenDbFileName :: String,
     watchedSubreddit :: Text,
     notifyOnPostId :: ID Post,
     port :: Int,
@@ -23,11 +24,12 @@ config :: Config
 config =
   Config
     { dbFileName = "/data/posts.db",
+      tokenDbFileName = "/data/tokens.db",
       watchedSubreddit = "pokemontrades",
       notifyOnPostId = PostID "13fzjhf",
       port = thePort,
       keywords = ["apri", "dream", "beast", "safari", "sport", "fast", "friend", "heavy", "level", "love", "lure", "moon"],
       userAgent = "github:penelopeysm/apribot by /u/is_a_togekiss",
-      redirectUri = "https://apribot.fly.dev/authorised"
-      -- redirectUri = T.pack (printf "http://localhost:%d/authorised" thePort)
+      -- redirectUri = "https://apribot.fly.dev/authorised"
+      redirectUri = T.pack (printf "http://localhost:%d/authorised" thePort)
     }

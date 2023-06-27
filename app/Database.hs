@@ -19,6 +19,17 @@
 --    - id         : Post ID.
 --    - username   : The Reddit username of the person who voted (no \/u\/ prefix).
 --    - vote       : 1 if the user says it is Aprimon-related. 0 if not.
+--
+-- The tokens are stored in data/tokens.db. The schema is:
+--
+--    - id         : Text, primary key. This is the value stored in the user's
+--                   cookie, which we use to look up their token
+--    The next four columns are direct serialisations of the Reddit.Auth.Token
+--    type.
+--    - token      : Text
+--    - token_type : Text
+--    - expires_at : Text
+--    - scopes     : Text
 module Database
   ( addToDb,
     getLatestHits,
@@ -31,21 +42,29 @@ module Database
     addVote,
     getNumVotes,
     getAllVotesBy,
+    addToken,
+    getToken,
+    removeToken
   )
 where
 
 import Config
 import Control.Monad (forM_)
 import Control.Monad.IO.Class (liftIO)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromJust, fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Encoding (decodeUtf8, encodeUtf8)
 import Data.Time.Format
+import Data.Time.Format.ISO8601
 import Database.SQLite.Simple
 import Paths_apribot (getDataFileName)
 import Reddit
+import Reddit.Auth (Token (..), parseScopes, showScopes)
 import Text.Printf (printf)
 import Utils
+
+-- posts.db
 
 -- | Add a post to the SQLite database. The Bool parameter indicates whether it
 -- was a hit or not.
@@ -175,3 +194,60 @@ _populateDB = do
         ]
 
   close sql
+
+-- tokens.db
+
+getTokenDbConn :: IO Connection
+getTokenDbConn = getDataFileName (tokenDbFileName config) >>= open
+
+serialiseToken :: Token -> (Text, Text, Text, Text)
+serialiseToken tkn =
+  ( decodeUtf8 $ token tkn,
+    decodeUtf8 $ tokenType tkn,
+    T.pack $ iso8601Show $ tokenExpiresAt tkn,
+    showScopes $ tokenScopes tkn
+  )
+
+deserialiseToken :: (Text, Text, Text, Text) -> Token
+deserialiseToken (token, tokenType, expiresAt, scopes) =
+  Token
+    { token = encodeUtf8 token,
+      tokenType = encodeUtf8 tokenType,
+      tokenExpiresAt = fromJust $ iso8601ParseM (T.unpack expiresAt),
+      tokenScopes = parseScopes scopes,
+      tokenRefreshToken = Nothing
+    }
+
+addToken :: Text -> Token -> IO ()
+addToken identifier tkn = do
+  let (token, tokenType, expiresAt, scopes) = serialiseToken tkn
+  conn <- getTokenDbConn
+  executeNamed
+    conn
+    "INSERT INTO tokens (id, token, token_type, expires_at, scopes) VALUES (:id, :token, :token_type, :expires_at, :scopes) ON CONFLICT(id) DO UPDATE SET token = :token, token_type = :token_type, expires_at = :expires_at, scopes = :scopes WHERE id = :id;"
+    [ ":id" := identifier,
+      ":token" := token,
+      ":token_type" := tokenType,
+      ":expires_at" := expiresAt,
+      ":scopes" := scopes
+    ]
+  close conn
+
+getToken :: Text -> IO (Maybe Token)
+getToken identifier = do
+  conn <- getTokenDbConn
+  tokens <-
+    queryNamed
+      conn
+      "SELECT token, token_type, expires_at, scopes FROM tokens WHERE id = :id"
+      [":id" := identifier]
+  close conn
+  pure $ case tokens of
+    [] -> Nothing
+    (t : _) -> Just $ deserialiseToken t
+
+removeToken :: Text -> IO ()
+removeToken identifier = do
+  conn <- getTokenDbConn
+  executeNamed conn "DELETE FROM tokens WHERE id = :id" [":id" := identifier]
+  close conn

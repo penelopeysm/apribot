@@ -6,8 +6,6 @@ import Control.Applicative (liftA2)
 import Control.Concurrent (MVar)
 import Control.Exception (SomeException, try)
 import Control.Monad.IO.Class (liftIO)
-import Data.IORef
-import qualified Data.Map as M
 import Data.Password.Bcrypt
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -35,36 +33,28 @@ tokenCookieName = "apribotToken"
 
 -- * Storage of OAuth2 tokens in memory
 
--- TODO: Deal with tokens which have expired
-type TokenStore = M.Map Text Token
-
-addToTokenStore :: Text -> Token -> IORef TokenStore -> IO ()
-addToTokenStore userSessionId authToken dbRef = do
-  atomicModifyIORef' dbRef (\db -> (M.insert userSessionId authToken db, ()))
-
-removeFromTokenStore :: Text -> IORef TokenStore -> IO ()
-removeFromTokenStore userSessionId dbRef = do
-  atomicModifyIORef' dbRef (\db -> (M.delete userSessionId db, ()))
-
 -- * Generating RedditEnv values to use
 
 -- | Retrieve token-identifier cookie, and thus the token from the database, if
 -- the user has one.
-retrieveRedditEnv :: IORef TokenStore -> S.ActionM (Maybe RedditEnv)
-retrieveRedditEnv dbRef = do
-  db <- liftIO $ readIORef dbRef
+retrieveRedditEnv :: S.ActionM (Maybe RedditEnv)
+retrieveRedditEnv = do
   maybeCookie <- SC.getCookie tokenCookieName
-  case maybeCookie >>= (`M.lookup` db) of
-    Just t -> Just <$> liftIO (newEnv t (userAgent config))
+  case maybeCookie of
     Nothing -> pure Nothing
+    Just sessionId -> do
+      maybeToken <- liftIO $ getToken sessionId
+      case maybeToken of
+        Just t -> Just <$> liftIO (newEnv t (userAgent config))
+        Nothing -> pure Nothing
 
 -- | Make a new RedditEnv by requesting a token. This is to be used on the
 -- redirect URI and assumes that the user has been redirected to here after
 -- granting access on Reddit (i.e. the URI query params contains an
 -- authorisation code which can be used to request an access token). If the
 -- params are not present then this redirects the user back to "/".
-makeNewRedditEnv :: Text -> Text -> Text -> IORef TokenStore -> S.ActionM ()
-makeNewRedditEnv clientId clientSecret redirectUri dbRef = do
+makeNewRedditEnv :: Text -> Text -> Text -> S.ActionM ()
+makeNewRedditEnv clientId clientSecret redirectUri = do
   -- Retrieve stored state from the cookie
   hashedState <- fmap PasswordHash <$> SC.getCookie hashedStateCookieName
   -- Get the authentication code and state from the URI query parameters, and
@@ -95,19 +85,19 @@ makeNewRedditEnv clientId clientSecret redirectUri dbRef = do
             C.setCookieSameSite = Just C.sameSiteLax,
             C.setCookieSecure = True
           }
-      -- Store the token in the 'database' using this session ID
-      liftIO $ addToTokenStore sessionId t dbRef
+      -- Store the token in the database using this session ID
+      liftIO $ addToken sessionId t
     _ -> do
       S.redirect "auth_error"
 
 -- | Deletes all cookies and the corresponding token from the database (if it
 -- exists)
-cleanup :: IORef TokenStore -> S.ActionM ()
-cleanup dbRef = do
+cleanup :: S.ActionM ()
+cleanup = do
   maybeCookie <- SC.getCookie tokenCookieName
   case maybeCookie of
     Just cookie -> do
-      liftIO $ removeFromTokenStore cookie dbRef
+      liftIO $ removeToken cookie
       SC.deleteCookie tokenCookieName
       SC.deleteCookie hashedStateCookieName
     Nothing -> pure ()
@@ -127,7 +117,7 @@ makeTableRowFromSql (pid, purl, ptitle, psubmitter, ptime, pflair) =
         toHtml ptime,
         toHtml ("/u/" <> psubmitter),
         toHtml pflair,
-        a_ [href_ purl] $ toHtmlRaw $ sanitizeBalance $ ptitle
+        a_ [href_ purl] $ toHtmlRaw $ sanitizeBalance ptitle
       ]
 
 -- | Reusable <head> element lead element for HTML page
@@ -298,7 +288,7 @@ contributingLoggedOutHtml totalPosts labelledPosts = do
       " have been labelled. "
       "If you have a few minutes to spare, please consider helping me out by increasing this number!"
     div_ [id_ "login-link-container"] $ do
-      a_ [href_ "/login", id_ "login-link"] $ "Log in with Reddit"
+      a_ [href_ "/login", id_ "login-link"] "Log in with Reddit"
     p_ $ do
       b_ "ApriBot uses cookies only to log you in and to keep you logged in. "
       b_ "By logging in, it is assumed that you consent to this. "
@@ -417,7 +407,6 @@ web lock = do
   clientId <- getEnvAsText "REDDIT_FE_ID"
   clientSecret <- getEnvAsText "REDDIT_FE_SECRET"
   staticDir <- getDataFileName "static"
-  dbRef <- newIORef M.empty
   atomically lock $ printf "Launching web server on port %d...\n" (port config)
 
   S.scotty (port config) $ do
@@ -461,7 +450,7 @@ web lock = do
       S.file (staticDir <> "/" <> "enableButton.js")
 
     S.get "/authorised" $ do
-      makeNewRedditEnv clientId clientSecret (redirectUri config) dbRef
+      makeNewRedditEnv clientId clientSecret (redirectUri config)
       S.redirect "/contribute"
 
     S.get "/auth_error" $ do
@@ -471,7 +460,7 @@ web lock = do
       S.html $ renderText $ doctypehtml_ contribErrorHtml
 
     S.get "/login" $ do
-      maybeEnv <- retrieveRedditEnv dbRef
+      maybeEnv <- retrieveRedditEnv
       case maybeEnv of
         Just _ -> S.redirect "/contribute"
         Nothing -> do
@@ -504,7 +493,7 @@ web lock = do
       case maybeCookie of
         Nothing -> S.redirect "/"
         Just _ -> do
-          cleanup dbRef
+          cleanup
           S.html $ renderText $ doctypehtml_ logoutHtml
 
     S.post "/contribute" $ do
@@ -522,7 +511,7 @@ web lock = do
         _ -> S.redirect "/contrib_error"
 
     S.get "/contribute" $ do
-      maybeEnv <- retrieveRedditEnv dbRef
+      maybeEnv <- retrieveRedditEnv
       case maybeEnv of
         -- User is not logged in
         Nothing -> do
@@ -536,7 +525,7 @@ web lock = do
           usernameEither <- liftIO $ try $ runRedditT' env (accountUsername <$> myAccount)
           case usernameEither of
             Left e -> do
-              cleanup dbRef
+              cleanup
               S.html $ renderText $ errorHtml e
             Right username -> do
               -- Get data from database
@@ -551,7 +540,7 @@ web lock = do
       S.html $ renderText $ doctypehtml_ privacyHtml
 
     S.get "/your_votes" $ do
-      maybeEnv <- retrieveRedditEnv dbRef
+      maybeEnv <- retrieveRedditEnv
       case maybeEnv of
         -- User is not logged in
         Nothing -> do
@@ -562,7 +551,7 @@ web lock = do
           usernameEither <- liftIO $ try $ runRedditT' env (accountUsername <$> myAccount)
           case usernameEither of
             Left e -> do
-              cleanup dbRef
+              cleanup
               S.html $ renderText $ errorHtml e
             Right username -> do
               -- Get data from database
