@@ -30,6 +30,6 @@ config =
       port = thePort,
       keywords = ["apri", "dream", "beast", "safari", "sport", "fast", "friend", "heavy", "level", "love", "lure", "moon"],
       userAgent = "github:penelopeysm/apribot by /u/is_a_togekiss",
-      -- redirectUri = "https://apribot.fly.dev/authorised"
-      redirectUri = T.pack (printf "http://localhost:%d/authorised" thePort)
+      redirectUri = "https://apribot.fly.dev/authorised"
+      -- redirectUri = T.pack (printf "http://localhost:%d/authorised" thePort)
     }

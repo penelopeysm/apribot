@@ -362,8 +362,8 @@ contributingLoggedInHtml username totalPosts labelledPosts labelledPostsByUser n
                 toHtmlRaw $
                   commonmarkToHtml [optSmart] [extTable, extStrikethrough] postBody
 
-yourVotesHtml :: Text -> [(Text, Text, Text, Text, Int)] -> Html ()
-yourVotesHtml username votes = do
+yourVotesHtml :: Int -> Text -> [(Text, Text, Text, Text, Int)] -> Html ()
+yourVotesHtml totalLabelledByUser username votes = do
   let makeTableRow :: (Text, Text, Text, Text, Int) -> Html ()
       makeTableRow (postId, postTitle, postUrl, postSubmitter, vote) =
         tr_ $ do
@@ -392,8 +392,15 @@ yourVotesHtml username votes = do
       [] -> p_ "You have not labelled any posts yet."
       _ -> do
         p_ $ do
-          "Here are all the posts you have labelled so far (most recent on top). "
-          "Thank you so much for your help!"
+          "In total, you have labelled "
+          toHtml (show totalLabelledByUser)
+          " posts. Here are "
+          if totalLabelledByUser > length votes
+             then do
+                "the last "
+                toHtml (show $ length votes)
+             else "all the"
+          " posts you have labelled (most recent on top). Thank you so much for your help!"
         p_ $ do
           "If you find you need to change or delete any of your votes, please get in touch with me via "
           a_ [href_ "https://reddit.com/u/is_a_togekiss"] "Reddit"
@@ -524,7 +531,9 @@ web lock = do
         Nothing -> do
           sqlFileName <- getSqlFileName
           (totalPosts, labelledPosts) <- liftIO $ withConnection sqlFileName $ \sql -> do
-            (,) <$> getTotalRows sql <*> getTotalNumberLabelled sql
+            (,)
+              <$> getTotalRows sql
+              <*> getTotalNumberLabelled sql
           S.html $ renderText $ doctypehtml_ $ do
             contributingLoggedOutHtml totalPosts labelledPosts
         -- User is logged in
@@ -568,7 +577,10 @@ web lock = do
             Right username -> do
               -- Get data from database
               sqlFileName <- getSqlFileName
-              votes <- liftIO $ withConnection sqlFileName $ getAllVotesBy username
+              (votes, nLabelledByUser) <- liftIO $ withConnection sqlFileName $ \sql ->
+                (,)
+                  <$> getLastNVotesBy 100 username sql
+                  <*> getNumberLabelledBy username sql
               -- Serve HTML
               S.html $ renderText $ doctypehtml_ $ do
-                yourVotesHtml username votes
+                yourVotesHtml nLabelledByUser username votes

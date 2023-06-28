@@ -41,7 +41,7 @@ module Database
     getNextUnlabelledPost,
     addVote,
     getNumVotes,
-    getAllVotesBy,
+    getLastNVotesBy,
     addToken,
     getToken,
     removeToken
@@ -143,14 +143,14 @@ getNumVotes conn =
   fromOnly . head
     <$> query_ conn "SELECT COUNT(*) FROM votes;"
 
--- | Get all votes by a given user. Returned in descending order of time, i.e.
--- most recent votes first.
-getAllVotesBy :: Text -> Connection -> IO [(Text, Text, Text, Text, Int)]
-getAllVotesBy username conn =
+-- | Get the most recent @count@ votes by a given user. Returned in descending
+-- order of time, i.e. most recent votes first.
+getLastNVotesBy :: Int -> Text -> Connection -> IO [(Text, Text, Text, Text, Int)]
+getLastNVotesBy count username conn =
   queryNamed
     conn
-    "SELECT votes.id, posts.title, posts.url, posts.submitter, votes.vote FROM posts INNER JOIN votes ON posts.id=votes.id WHERE votes.username = :username ORDER BY votes.n DESC;"
-    [":username" := username]
+    "SELECT votes.id, posts.title, posts.url, posts.submitter, votes.vote FROM posts INNER JOIN votes ON posts.id=votes.id WHERE votes.username = :username ORDER BY votes.n DESC LIMIT :count;"
+    [":username" := username, ":count" := count]
 
 -- | Set up the database from scratch. Do not use this unless you want to start
 -- all over again...!
