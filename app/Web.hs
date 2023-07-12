@@ -275,19 +275,14 @@ contributingLoggedOutHtml totalPosts labelledPosts = do
       a_ [href_ "/privacy"] "privacy"
       ")"
     p_ $ do
-      "At the moment, ApriBot uses a very primitive keyword-searching system for identifying Aprimon-related posts. "
-      "My goal is to eventually replace this with "
-      a_ [href_ "https://github.com/penelopeysm/apriml"] "some sort of machine learning algorithm"
-      "."
-    p_ $ do
-      "However, to do this, I need "
+      "Machine learning algorithms, such as the one ApriBot uses, need to be trained on"
       i_ "labelled data"
       ": that is, a number of posts which have been manually classified (by experts—yes, that's you!) as being either Aprimon-related or not. "
       "Right now, out of a total of "
       toHtml (show totalPosts)
       " posts, "
       toHtml (show labelledPosts)
-      " have been labelled. "
+      " have been labelled; 7709 of these were used to train ApriBot's current algorithm. "
       "If you have a few minutes to spare, please consider helping me out by increasing this number!"
     div_ [id_ "login-link-container"] $ do
       a_ [href_ "/login", id_ "login-link"] "Log in with Reddit"
