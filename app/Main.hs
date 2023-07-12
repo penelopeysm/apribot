@@ -20,12 +20,12 @@ import Web
 -- ensemble of logistic regression and XGBoost sub-classifiers.
 isHit :: Post -> IO Bool
 isHit post = do
-  result <- readProcess (pythonClassifier config) [] (T.unpack $ postTitle post <> " " <> postBody post)
-  case result of
+  result <- T.pack <$> readProcess (pythonClassifier config) [] (T.unpack $ postTitle post <> " " <> postBody post)
+  case T.strip result of
     "True" -> pure True
     "False" -> pure False
     _ -> do
-      T.hPutStrLn stderr ("Invalid result from classifier: " <> T.pack result)
+      T.hPutStrLn stderr ("Invalid result from classifier: <" <> result <> ">")
       pure False
 
 -- | Process newly seen posts.
