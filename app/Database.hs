@@ -35,7 +35,8 @@ module Database
     getLatestHits,
     getLatestNonHits,
     getTotalRows,
-    getTotalHits,
+    getTotalMLAssignedRows,
+    getTotalMLAssignedHits,
     getTotalNumberLabelled,
     getNumberLabelledBy,
     getNextUnlabelledPost,
@@ -99,10 +100,15 @@ getLatestNonHits n conn =
 getTotalRows :: Connection -> IO Int
 getTotalRows conn =
   fromOnly . head
-    <$> query_ conn "SELECT COUNT(*) FROM posts WHERE hit = 1 or hit = 0;"
+    <$> query_ conn "SELECT COUNT(*) FROM posts;"
 
-getTotalHits :: Connection -> IO Int
-getTotalHits conn =
+getTotalMLAssignedRows :: Connection -> IO Int
+getTotalMLAssignedRows conn =
+  fromOnly . head
+    <$> query_ conn "SELECT COUNT(*) FROM posts where hit = 1 or hit = 0;"
+
+getTotalMLAssignedHits :: Connection -> IO Int
+getTotalMLAssignedHits conn =
   fromOnly . head
     <$> query_ conn "SELECT COUNT(*) FROM posts WHERE hit = 1;"
 

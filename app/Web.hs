@@ -156,8 +156,8 @@ mainHtml = do
   (hits, nonhits, n, m) <- liftIO $ withConnection sqlFileName $ \sql -> do
     hits <- getLatestHits 50 sql
     nonhits <- getLatestNonHits 50 sql
-    n <- getTotalRows sql
-    m <- getTotalHits sql
+    n <- getTotalMLAssignedRows sql
+    m <- getTotalMLAssignedHits sql
     pure (hits, nonhits, n, m)
 
   pure $ doctypehtml_ $ do
@@ -275,9 +275,9 @@ contributingLoggedOutHtml totalPosts labelledPosts = do
       a_ [href_ "/privacy"] "privacy"
       ")"
     p_ $ do
-      "Machine learning algorithms, such as the one ApriBot uses, need to be trained on"
+      "Machine learning algorithms, such as the one ApriBot uses, need to be trained on "
       i_ "labelled data"
-      ": that is, a number of posts which have been manually classified (by experts—yes, that's you!) as being either Aprimon-related or not. "
+      ": that is, posts which have been manually classified (by experts—yes, that's you!) as being either Aprimon-related or not. "
       "Right now, out of a total of "
       toHtml (show totalPosts)
       " posts, "
