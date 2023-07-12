@@ -1,2 +1,3 @@
 dist-newstyle
 *.db
+**/__pycache__

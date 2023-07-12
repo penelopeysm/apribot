@@ -6,14 +6,15 @@ import Reddit
 import Text.Printf (printf)
 
 data Config = Config
-  { dbFileName :: String,
-    tokenDbFileName :: String,
+  { dbFileName :: FilePath,
+    tokenDbFileName :: FilePath,
     watchedSubreddit :: Text,
     notifyOnPostId :: ID Post,
     port :: Int,
     keywords :: [Text],
     userAgent :: Text,
-    redirectUri :: Text
+    redirectUri :: Text,
+    pythonClassifier :: FilePath
   }
 
 thePort :: Int
@@ -30,6 +31,7 @@ config =
       port = thePort,
       keywords = ["apri", "dream", "beast", "safari", "sport", "fast", "friend", "heavy", "level", "love", "lure", "moon"],
       userAgent = "github:penelopeysm/apribot by /u/is_a_togekiss",
-      redirectUri = "https://apribot.fly.dev/authorised"
-      -- redirectUri = T.pack (printf "http://localhost:%d/authorised" thePort)
+      redirectUri = "https://apribot.fly.dev/authorised",
+      -- redirectUri = T.pack (printf "http://localhost:%d/authorised" thePort),
+      pythonClassifier = "python/predict.py"
     }

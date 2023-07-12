@@ -5,25 +5,28 @@ import Control.Concurrent (MVar, forkIO, newMVar, threadDelay)
 import Control.Exception (SomeException, catch)
 import Control.Monad.IO.Class (liftIO)
 import Data.Maybe (fromMaybe)
-import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Database
 import Reddit
 import System.IO
+import System.Process (readProcess)
 import Text.Printf (printf)
 import Utils
 import Web
 
--- | Checks whether a string is found in either the post title or the post body.
-hasWord :: Post -> Text -> Bool
-hasWord post term =
-  term `T.isInfixOf` T.toCaseFold (postTitle post)
-    || term `T.isInfixOf` T.toCaseFold (postBody post)
-
--- | TODO: Replace with deep learning
-isHit :: Post -> Bool
-isHit post = any (hasWord post) (keywords config)
+-- | Determine whether a post is a hit. This uses an external Python script and
+-- a pickled (technically joblib'd) scikit-learn classifier, namely, a stacked
+-- ensemble of logistic regression and XGBoost sub-classifiers.
+isHit :: Post -> IO Bool
+isHit post = do
+  result <- readProcess (pythonClassifier config) [] (T.unpack $ postTitle post <> " " <> postBody post)
+  case result of
+    "True" -> pure True
+    "False" -> pure False
+    _ -> do
+      T.hPutStrLn stderr ("Invalid result from classifier: " <> T.pack result)
+      pure False
 
 -- | Process newly seen posts.
 process :: MVar () -> Post -> RedditT (MVar ())
@@ -37,7 +40,8 @@ process lock post = do
           (postAuthor post)
           (fromMaybe "None" (postFlairText post))
           (show $ postCreatedTime post)
-  if isHit post
+  hit <- liftIO $ isHit post
+  if hit
     then do
       addNewComment (notifyOnPostId config) (T.pack commentText)
       liftIO $ do

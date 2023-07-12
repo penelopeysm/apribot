@@ -2,7 +2,6 @@ module Web (web) where
 
 import CMarkGFM
 import Config
-import Control.Applicative (liftA2)
 import Control.Concurrent (MVar)
 import Control.Exception (SomeException, try)
 import Control.Monad.IO.Class (liftIO)
@@ -45,7 +44,7 @@ retrieveRedditEnv = do
     Just sessionId -> do
       maybeToken <- liftIO $ getToken sessionId
       case maybeToken of
-        Just t -> Just <$> liftIO (newEnv t (userAgent config))
+        Just t -> Just <$> liftIO (mkEnvFromToken t (userAgent config))
         Nothing -> pure Nothing
 
 -- | Make a new RedditEnv by requesting a token. This is to be used on the
@@ -169,14 +168,15 @@ mainHtml = do
         p_ $ do
           "ApriBot monitors new posts on the "
           a_ [href_ "https://reddit.com/r/pokemontrades"] "/r/pokemontrades"
-          " subreddit and identifies potential Aprimon-related threads."
-          " It does so by scanning for certain keywords in either the post title or body."
+          " subreddit and identifies potential Aprimon-related threads, using a machine learning algorithm trained on 7709 "
+          a_ [href_ "/contribute"] "manually labelled"
+          " posts from /r/pokemontrades."
         p_ $ do
-          toHtml (printf "So far, ApriBot has processed a total of %d posts," n :: String)
+          toHtml (printf "So far, ApriBot's new algorithm has processed a total of %d posts," n :: String)
           toHtml (printf " of which %d were hits (%.2f%%)." m (100 * fromIntegral m / fromIntegral n :: Double) :: String)
           " This page shows you the most recent 50 hits and non-hits, ordered by most recent first."
         p_ $ do
-          "ApriBot is implemented with Haskell and SQLite."
+          "ApriBot is implemented with Haskell and SQLite; the ML bits are written in Python."
           " If you’re interested, its source code is on "
           a_ [href_ "https://github.com/penelopeysm/apribot"] "GitHub"
           ". (Issues and pull requests are welcome!) "
@@ -186,7 +186,7 @@ mainHtml = do
           a_ [href_ "https://reddit.com/u/is_a_togekiss"] "Reddit"
           "."
         p_ $ do
-          b_ "I am currently looking for people to help me improve ApriBot's hit-detection algorithm."
+          b_ "While the current algorithm has quite good performance (>93% cross-validation F1 score), I might be able to make it even better in the future with more data."
           " If you are interested and have a few minutes to spare, do head over to the "
           a_ [href_ "/contribute"] "contribute page"
           "—I will be very grateful!"
@@ -492,10 +492,11 @@ web lock = do
           -- Redirect to Reddit's auth page
           S.redirect $
             fromStrict $
-              mkRedditAuthURL $
+              mkRedditAuthURL
+                False
                 AuthUrlParams
                   { authUrlClientID = clientId,
-                    authUrlState = Just state,
+                    authUrlState = state,
                     authUrlRedirectUri = redirectUri config,
                     authUrlDuration = Temporary,
                     authUrlScopes = Set.singleton ScopeIdentity

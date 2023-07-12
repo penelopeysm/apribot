@@ -8,7 +8,5 @@ RUN git config --global --add safe.directory '*'
 
 RUN cabal update
 RUN cabal build
-RUN apt update
-RUN apt install -y sqlite3
 CMD cabal run
 EXPOSE 8080

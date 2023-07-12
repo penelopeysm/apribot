@@ -67,7 +67,7 @@ executable apribot
     other-modules:    Paths_apribot, Web, Config, Utils, Database
 
     -- Other library packages from which modules are imported.
-    build-depends:    base ^>=4.17.0.0,
+    build-depends:    base,
                       text,
                       reddit-oauth2,
                       containers,
@@ -81,7 +81,8 @@ executable apribot
                       password,
                       bytestring,
                       cmark-gfm,
-                      xss-sanitize
+                      xss-sanitize,
+                      process
 
     -- Directories containing source files.
     hs-source-dirs:   app

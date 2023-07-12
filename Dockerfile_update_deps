@@ -1,6 +1,0 @@
-FROM penelopeysm/apribot-dependencies:latest
-WORKDIR /
-COPY . .
-RUN git config --global --add safe.directory '*'
-RUN cabal update
-RUN cabal build

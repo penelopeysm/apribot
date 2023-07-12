@@ -1,0 +1,37 @@
+# Generate a fresh Docker image containing all the dependencies that
+# we need to run the web app (and manage it over SSH).
+#
+# Usage:
+#   docker build . -f Dockerfile_from_scratch -t penelopeysm/apribot-dependencies
+#   docker tag penelopeysm/apribot-dependencies penelopeysm/apribot-dependencies:<VERSION_NUMBER>
+#   docker push penelopeysm/apribot-dependencies
+#
+# After this is done, the main Dockerfile will just pull from this pre-built
+# image, meaning that we don't have to re-build the dependencies every time we
+# deploy.
+
+FROM python:3.11.4-bookworm
+
+WORKDIR /
+COPY . .
+RUN git config --global --add safe.directory '*'
+
+# Install sqlite3
+RUN apt-get update
+RUN apt-get install -y sqlite3
+
+# Install packages
+RUN python -m pip install --upgrade pip setuptools
+RUN python -m pip install -r python/requirements.txt
+
+# Set up Haskell
+# https://stackoverflow.com/a/71513191
+RUN curl https://downloads.haskell.org/~ghcup/x86_64-linux-ghcup > /usr/bin/ghcup && chmod +x /usr/bin/ghcup
+RUN ghcup -v install ghc --isolate /usr/local --force 9.6.2
+RUN ghcup -v install cabal --isolate /usr/local/bin --force 3.10.1.0
+RUN cabal update
+RUN cabal build
+
+CMD ["/bin/bash"]
+
+# vim: ft=dockerfile
