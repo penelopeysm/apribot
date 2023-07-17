@@ -64,7 +64,7 @@ executable apribot
     main-is:          Main.hs
 
     -- Modules included in this executable, other than Main.
-    other-modules:    Paths_apribot, Web, Config, Utils, Database
+    other-modules:    Paths_apribot, Web, Config, Utils, Database, DiscordBot
 
     -- Other library packages from which modules are imported.
     build-depends:    base,
@@ -82,7 +82,9 @@ executable apribot
                       bytestring,
                       cmark-gfm,
                       xss-sanitize,
-                      process
+                      process,
+                      discord-haskell,
+                      mtl
 
     -- Directories containing source files.
     hs-source-dirs:   app

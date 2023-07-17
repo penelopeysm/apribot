@@ -1,15 +1,13 @@
 module Config (Config (..), config) where
 
+import Discord.Types
 import Data.Text (Text)
-import qualified Data.Text as T
-import Reddit
-import Text.Printf (printf)
 
 data Config = Config
   { dbFileName :: FilePath,
     tokenDbFileName :: FilePath,
     watchedSubreddit :: Text,
-    notifyOnPostId :: ID Post,
+    discordChannelId :: ChannelId,
     port :: Int,
     keywords :: [Text],
     userAgent :: Text,
@@ -27,7 +25,7 @@ config =
     { dbFileName = "/data/posts.db",
       tokenDbFileName = "/data/tokens.db",
       watchedSubreddit = "pokemontrades",
-      notifyOnPostId = PostID "13fzjhf",
+      discordChannelId = DiscordId $ Snowflake 1130599509689384963,
       port = thePort,
       keywords = ["apri", "dream", "beast", "safari", "sport", "fast", "friend", "heavy", "level", "love", "lure", "moon"],
       userAgent = "github:penelopeysm/apribot by /u/is_a_togekiss",

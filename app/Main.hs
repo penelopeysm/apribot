@@ -1,13 +1,13 @@
 module Main where
 
 import Config
-import Control.Concurrent (MVar, forkIO, newMVar, threadDelay)
+import Control.Concurrent (MVar, forkIO, newEmptyMVar, newMVar, threadDelay)
 import Control.Exception (SomeException, catch)
 import Control.Monad.IO.Class (liftIO)
-import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Database
+import DiscordBot
 import Reddit
 import System.IO
 import System.Process (readProcess)
@@ -29,36 +29,27 @@ isHit post = do
       pure False
 
 -- | Process newly seen posts.
-process :: MVar () -> Post -> RedditT (MVar ())
-process lock post = do
-  let commentText =
-        printf
-          "**Title:** [%s](%s)\n\n**Poster:** [\\/u\\/%s](https://reddit.com/user/%s)\n\n**Tag:** %s\n\n**Posted at:** %s"
-          (postTitle post)
-          (postUrl post)
-          (markdownEscape $ postAuthor post)
-          (postAuthor post)
-          (fromMaybe "None" (postFlairText post))
-          (show $ postCreatedTime post)
+process :: (MVar (), MVar Post) -> Post -> RedditT (MVar (), MVar Post)
+process (stdoutLock, discordLock) post = do
   hit <- liftIO $ isHit post
   if hit
     then do
-      addNewComment (notifyOnPostId config) (T.pack commentText)
       liftIO $ do
         addToDb post True
-        atomically lock $
+        notifyDiscord discordLock post
+        atomically stdoutLock $
           printf "Hit: %s\n%s\n%s\n" (unPostID (postId post)) (postTitle post) (postUrl post)
     else do
       liftIO $ do
         addToDb post False
-        atomically lock $
+        atomically stdoutLock $
           printf "Non-hit: %s\n%s\n%s\n" (unPostID (postId post)) (postTitle post) (postUrl post)
-  pure lock
+  pure (stdoutLock, discordLock)
 
 -- | Thread to stream Reddit posts and process them
-bot :: MVar () -> IO ()
-bot lock = do
-  atomically lock $ T.putStrLn "Starting Reddit bot..."
+redditBot :: MVar () -> MVar Post -> IO ()
+redditBot stdoutLock discordLock = do
+  atomically stdoutLock $ T.putStrLn "Starting Reddit bot..."
   ownerUsername <- getEnvAsText "REDDIT_USERNAME"
   ownerPassword <- getEnvAsText "REDDIT_PASSWORD"
   ownerClientId <- getEnvAsText "REDDIT_ID"
@@ -67,9 +58,9 @@ bot lock = do
   env <- authenticate creds (userAgent config)
   let loop = do
         catch
-          (runRedditT' env $ postStream defaultStreamSettings process lock (watchedSubreddit config))
+          (runRedditT' env $ postStream defaultStreamSettings process (stdoutLock, discordLock) (watchedSubreddit config))
           ( \(e :: SomeException) -> do
-              atomically lock $ T.hPutStrLn stderr ("Exception: " <> T.pack (show e))
+              atomically stdoutLock $ T.hPutStrLn stderr ("Exception: " <> T.pack (show e))
               threadDelay 5000000
               loop
           )
@@ -79,7 +70,9 @@ bot lock = do
 main :: IO ()
 main = do
   hSetBuffering stdout NoBuffering
-  -- Run bot and web server concurrently
-  lock <- newMVar ()
-  _ <- forkIO $ web lock
-  bot lock
+  -- Run Reddit bot, Discord bot, and web server concurrently
+  stdoutLock :: MVar () <- newMVar ()
+  discordLock :: MVar Post <- newEmptyMVar
+  _ <- forkIO $ web stdoutLock
+  _ <- forkIO $ redditBot stdoutLock discordLock
+  discordBot stdoutLock discordLock
