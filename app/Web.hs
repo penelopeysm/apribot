@@ -2,7 +2,6 @@ module Web (web) where
 
 import CMarkGFM
 import Config
-import Control.Applicative (liftA2)
 import Control.Concurrent (MVar)
 import Control.Exception (SomeException, try)
 import Control.Monad.IO.Class (liftIO)
@@ -104,22 +103,21 @@ cleanup = do
 
 -- * HTML helpers
 
-gridHead :: Html ()
-gridHead = do
-  div_ [class_ "grid-table-header"] "Post ID"
-  div_ [class_ "grid-table-header"] "Time (UTC)"
-  div_ [class_ "grid-table-header"] "Submitter"
-  div_ [class_ "grid-table-header"] "Flair"
-  div_ [class_ "grid-table-header last-col"] "Title"
+tableHeaderSql :: Html ()
+tableHeaderSql =
+  tr_ $ mapM_ (th_ . toHtml) ["Post ID" :: Text, "Time (UTC)", "Submitter", "Flair", "Title"]
 
-makeGridRow :: (Text, Text, Text, Text, Text, Text) -> Html ()
-makeGridRow (pid, purl, ptitle, psubmitter, ptime, pflair) = do
-  div_ [class_ "grid-table-row"] $ code_ (toHtml pid)
-  div_ [class_ "grid-table-row"] $ toHtml ptime
-  div_ [class_ "grid-table-row"] $ toHtml ("/u/" <> psubmitter)
-  div_ [class_ "grid-table-row"] $ toHtml pflair
-  div_ [class_ "grid-table-row last-col"] $ do
-    a_ [href_ purl] $ toHtmlRaw $ sanitizeBalance ptitle
+makeTableRowFromSql :: (Text, Text, Text, Text, Text, Text) -> Html ()
+makeTableRowFromSql (pid, purl, ptitle, psubmitter, ptime, pflair) =
+  tr_ $
+    mapM_
+      td_
+      [ code_ (toHtml pid),
+        toHtml ptime,
+        toHtml ("/u/" <> psubmitter),
+        toHtml pflair,
+        a_ [href_ purl] $ toHtmlRaw $ sanitizeBalance ptitle
+      ]
 
 -- | Reusable <head> element lead element for HTML page
 headHtml :: Maybe Text -> Bool -> Html ()
@@ -195,15 +193,15 @@ mainHtml = do
       h2_ "Hits"
       if null hits
         then p_ "None so far!"
-        else div_ [class_ "grid-table"] $ do
-          gridHead
-          mapM_ makeGridRow (take 50 hits)
+        else table_ $ do
+          thead_ tableHeaderSql
+          tbody_ $ mapM_ makeTableRowFromSql (take 50 hits)
       h2_ "Non-hits"
       if null nonhits
         then p_ "None so far!"
-        else div_ [class_ "grid-table"] $ do
-          gridHead
-          mapM_ makeGridRow (take 50 nonhits)
+        else table_ $ do
+          thead_ tableHeaderSql
+          tbody_ $ mapM_ makeTableRowFromSql (take 50 nonhits)
 
 logoutHtml :: Html ()
 logoutHtml = do
@@ -393,10 +391,10 @@ yourVotesHtml totalLabelledByUser username votes = do
           toHtml (show totalLabelledByUser)
           " posts. Here are "
           if totalLabelledByUser > length votes
-            then do
-              "the last "
-              toHtml (show $ length votes)
-            else "all the"
+             then do
+                "the last "
+                toHtml (show $ length votes)
+             else "all the"
           " posts you have labelled (most recent on top). Thank you so much for your help!"
         p_ $ do
           "If you find you need to change or delete any of your votes, please get in touch with me via "

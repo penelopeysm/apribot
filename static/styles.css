@@ -1,5 +1,5 @@
 /* Google Fonts */
-@import url('https://fonts.googleapis.com/css2?family=Fira+Mono:wght@400&family=Nunito+Sans:ital,wght@0,400;0,700;1,400;1,700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400&family=Nunito+Sans:ital,wght@0,400;0,700;1,400;1,700&display=swap');
 
 :root {
   --light-blue: #f2f8fa;
@@ -7,7 +7,25 @@
   --pink: #ffd9f2;
 }
 
-/* General layout */
+th {
+  background-color: var(--less-light-blue);
+}
+
+th {
+  font-weight: bold;
+}
+
+th, td {
+  padding: 5px;
+}
+
+table, th, td {
+  border: 1px solid;
+}
+
+table {
+  border-collapse: collapse;
+}
 
 h2 {
   margin-top: 30px;
@@ -26,40 +44,10 @@ main {
 }
 
 code {
-  font-family: 'Fira Mono', monospace;
+  font-family: 'Fira Code', monospace;
   font-size: 13px;
 }
 
-
-/* Tables for main page */
-
-div.grid-table {
-  display: grid;
-  grid-template-columns: max-content max-content max-content max-content 1fr;
-  width: 100%;
-}
-
-div.grid-table-header {
-  background-color: var(--less-light-blue);
-  font-weight: bold;
-  padding: 5px;
-  border-top: 2px solid black;
-  border-bottom: 2px solid black;
-  border-left: 2px solid black;
-}
-
-div.grid-table-row {
-  padding: 5px;
-  border-left: 2px solid black;
-  border-bottom: 2px solid black;
-  font-size: 90%;
-}
-
-div.last-col {
-  border-right: 2px solid black;
-}
-
-/* Forms (for voting) */
 div.form-container {
   display: flex;
   justify-content: center;
