@@ -2,6 +2,7 @@ module Web (web) where
 
 import CMarkGFM
 import Config
+import Control.Applicative (liftA2)
 import Control.Concurrent (MVar)
 import Control.Exception (SomeException, try)
 import Control.Monad.IO.Class (liftIO)
@@ -109,15 +110,15 @@ tableHeaderSql =
 
 makeTableRowFromSql :: (Text, Text, Text, Text, Text, Text) -> Html ()
 makeTableRowFromSql (pid, purl, ptitle, psubmitter, ptime, pflair) =
-  tr_ $
+  tr_ $ do
     mapM_
       td_
       [ code_ (toHtml pid),
         toHtml ptime,
         toHtml ("/u/" <> psubmitter),
-        toHtml pflair,
-        a_ [href_ purl] $ toHtmlRaw $ sanitizeBalance ptitle
+        toHtml pflair
       ]
+    td_ [class_ "post-title"] $ a_ [href_ purl] $ toHtmlRaw $ sanitizeBalance ptitle
 
 -- | Reusable <head> element lead element for HTML page
 headHtml :: Maybe Text -> Bool -> Html ()
@@ -391,10 +392,10 @@ yourVotesHtml totalLabelledByUser username votes = do
           toHtml (show totalLabelledByUser)
           " posts. Here are "
           if totalLabelledByUser > length votes
-             then do
-                "the last "
-                toHtml (show $ length votes)
-             else "all the"
+            then do
+              "the last "
+              toHtml (show $ length votes)
+            else "all the"
           " posts you have labelled (most recent on top). Thank you so much for your help!"
         p_ $ do
           "If you find you need to change or delete any of your votes, please get in touch with me via "
