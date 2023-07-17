@@ -1,4 +1,4 @@
-FROM penelopeysm/apribot-dependencies:0.5-ghc9.4.5
+FROM penelopeysm/apribot:latest
 WORKDIR /
 COPY . .
 
@@ -7,5 +7,6 @@ COPY . .
 RUN git config --global --add safe.directory '*'
 RUN cabal update
 RUN cabal build
+
 CMD cabal run
 EXPOSE 8080
