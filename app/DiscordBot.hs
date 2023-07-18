@@ -47,8 +47,17 @@ eventHandler discordLock cid e = do
       env <- ask
       liftIO $ void $ forkIO $ runReaderT (channelLoop discordLock cid) env
     MessageCreate m -> do
-      when (userName (messageAuthor m) == "is_a_togekiss") $ do
-        void $ restCall $ DR.CreateMessage cid "hello :heart:"
+      let myUserId = DiscordId $ Snowflake 236863453443260419
+      when (userId (messageAuthor m) == myUserId) $ do
+        void $
+          restCall $
+            DR.CreateMessageDetailed
+              (messageChannelId m)
+              ( def
+                  { DR.messageDetailedAllowedMentions = Just (def {DR.mentionUserIds = [myUserId]}),
+                    DR.messageDetailedContent = "hello <@236863453443260419> :heart:"
+                  }
+              )
     _ -> pure ()
 
 -- | Loop which waits for a post to be added to the MVar. When one is added (via
