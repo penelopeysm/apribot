@@ -27,12 +27,9 @@ RUN python -m pip install -r python/requirements.txt
 # Set up Haskell
 # https://stackoverflow.com/a/71513191
 RUN curl https://downloads.haskell.org/~ghcup/x86_64-linux-ghcup > /usr/bin/ghcup && chmod +x /usr/bin/ghcup
+# discord-haskell doesn't work with GHC 9.6, so we stick to 9.4
 RUN ghcup -v install ghc --isolate /usr/local --force 9.4.5
-# cabal 3.10 and 3.8 seems to lead to a memory spike whenever `cabal run` is
-# called, which is fine locally, but causes the Fly VM (which has 256 MB of
-# RAM) to crash. So we stick to 3.6 here. To make that work nicely, we also
-# need to use GHC 9.4.5.
-RUN ghcup -v install cabal --isolate /usr/local/bin --force 3.6.2.0
+RUN ghcup -v install cabal --isolate /usr/local/bin --force 3.10.1.0
 RUN cabal update
 RUN cabal build
 

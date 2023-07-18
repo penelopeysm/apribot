@@ -1,4 +1,6 @@
 packages: .
+
+optimization: 0
           
 source-repository-package
     type: git
