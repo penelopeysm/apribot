@@ -66,3 +66,4 @@ channelLoop :: MVar Post -> ChannelId -> DiscordHandler ()
 channelLoop discordLock cid = do
   post <- liftIO $ takeMVar discordLock
   void $ restCall $ DR.CreateMessage cid (postUrl post)
+  channelLoop discordLock cid
