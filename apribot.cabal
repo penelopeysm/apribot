@@ -92,3 +92,4 @@ executable apribot
     -- Base language which the package is written in.
     default-language: Haskell2010
 
+    ghc-options: +RTS -M256m -RTS
