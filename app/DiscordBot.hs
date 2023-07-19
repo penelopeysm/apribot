@@ -1,8 +1,9 @@
 module DiscordBot (notifyDiscord, discordBot) where
 
 import Config
-import Control.Concurrent (MVar, forkIO, putMVar, takeMVar)
-import Control.Monad (void, when)
+import Control.Concurrent (MVar, forkIO)
+import Control.Concurrent.Chan (Chan, readChan, writeChan)
+import Control.Monad (forever, void, when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Reader (ask, runReaderT)
 import qualified Data.Text as T
@@ -15,14 +16,14 @@ import System.Environment (getEnv)
 import Utils
 
 -- | Run the Discord bot.
-discordBot :: MVar () -> MVar Post -> IO ()
-discordBot stdoutLock discordLock = do
+discordBot :: MVar () -> Chan Post -> IO ()
+discordBot stdoutLock discordChan = do
   discordToken <- T.pack <$> getEnv "DISCORD_APRIBOT_TOKEN"
   err <-
     runDiscord $
       def
         { discordToken = discordToken,
-          discordOnEvent = eventHandler discordLock (discordChannelId config),
+          discordOnEvent = eventHandler discordChan,
           discordOnStart = liftIO $ atomically stdoutLock $ putStrLn "Starting Discord bot..."
         }
   atomically stdoutLock $ T.putStrLn err
@@ -30,9 +31,9 @@ discordBot stdoutLock discordLock = do
 -- | This function is exported to allow the Reddit bot to talk to this module.
 -- It adds the post to the MVar, which effectively triggers channelLoop to post
 -- a message to Discord.
-notifyDiscord :: MVar Post -> Post -> IO ()
-notifyDiscord discordLock post = do
-  putMVar discordLock post
+notifyDiscord :: Chan Post -> Post -> IO ()
+notifyDiscord discordChan post = do
+  writeChan discordChan post
 
 -- | Discord event handler. Right now, this does two things:
 --
@@ -40,12 +41,12 @@ notifyDiscord discordLock post = do
 -- 2. Responds to messages from myself. This will be removed at some point in
 --    time, but the idea is that we might want to respond to other events in the
 --    future.
-eventHandler :: MVar Post -> ChannelId -> Event -> DiscordHandler ()
-eventHandler discordLock cid e = do
+eventHandler :: Chan Post -> Event -> DiscordHandler ()
+eventHandler discordChan e = do
   case e of
     Ready {} -> do
       env <- ask
-      liftIO $ void $ forkIO $ runReaderT (channelLoop discordLock cid) env
+      liftIO $ void $ forkIO $ runReaderT (channelLoop discordChan) env
     MessageCreate m -> do
       let myUserId = DiscordId $ Snowflake 236863453443260419
       when (userId (messageAuthor m) == myUserId) $ do
@@ -62,8 +63,10 @@ eventHandler discordLock cid e = do
 
 -- | Loop which waits for a post to be added to the MVar. When one is added (via
 -- the 'notifyDiscord' function), this posts it to the Discord channel.
-channelLoop :: MVar Post -> ChannelId -> DiscordHandler ()
-channelLoop discordLock cid = do
-  post <- liftIO $ takeMVar discordLock
-  void $ restCall $ DR.CreateMessage cid (postUrl post)
-  channelLoop discordLock cid
+channelLoop :: Chan Post -> DiscordHandler ()
+channelLoop discordChan = forever $ do
+  post <- liftIO $ readChan discordChan
+  case T.toLower (postSubreddit post) of
+    "pokemontrades" -> void $ restCall $ DR.CreateMessage (ptradesChannelId config) (postUrl post)
+    "bankballexchange" -> void $ restCall $ DR.CreateMessage (bbeChannelId config) (postUrl post)
+    _ -> pure ()

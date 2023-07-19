@@ -64,7 +64,7 @@ executable apribot
     main-is:          Main.hs
 
     -- Modules included in this executable, other than Main.
-    other-modules:    Paths_apribot, Web, Config, Utils, Database, DiscordBot
+    other-modules:    Paths_apribot, Web, Config, Utils, Database, DiscordBot, RedditBot
 
     -- Other library packages from which modules are imported.
     build-depends:    base,
