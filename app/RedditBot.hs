@@ -32,19 +32,27 @@ isHit post = do
 -- | Process newly seen posts.
 process :: (MVar (), Chan Post) -> Post -> RedditT (MVar (), Chan Post)
 process (stdoutLock, discordChan) post = do
-  hit <- liftIO $ isHit post
-  if hit
-    then do
+  case T.toLower (postSubreddit post) of
+    "pokemontrades" -> do
+      hit <- liftIO $ isHit post
+      if hit
+        then do
+          liftIO $ do
+            addToDb post True
+            notifyDiscord discordChan post
+            atomically stdoutLock $
+              printf "PTR Hit: %s\n%s\n%s\n" (unPostID (postId post)) (postTitle post) (postUrl post)
+        else do
+          liftIO $ do
+            addToDb post False
+            atomically stdoutLock $
+              printf "PTR Non-hit: %s\n%s\n%s\n" (unPostID (postId post)) (postTitle post) (postUrl post)
+    "bankballexchange" -> do
       liftIO $ do
-        when (T.toLower (postSubreddit post) == "pokemontrades") (addToDb post True)
         notifyDiscord discordChan post
         atomically stdoutLock $
-          printf "Hit: %s\n%s\n%s\n" (unPostID (postId post)) (postTitle post) (postUrl post)
-    else do
-      liftIO $ do
-        when (T.toLower (postSubreddit post) == "pokemontrades") (addToDb post False)
-        atomically stdoutLock $
-          printf "Non-hit: %s\n%s\n%s\n" (unPostID (postId post)) (postTitle post) (postUrl post)
+          printf "BBE: %s\n%s\n%s\n" (unPostID (postId post)) (postTitle post) (postUrl post)
+    _ -> pure ()
   pure (stdoutLock, discordChan)
 
 -- | Fetch posts from pokemontrades and BankBallExchange.
