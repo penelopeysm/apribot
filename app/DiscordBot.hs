@@ -79,19 +79,22 @@ eventHandler discordChan e = do
           DR.CreateReaction (messageChannelId m, messageId m) (T.pack $ show randomHeart)
     _ -> pure ()
 
+cleanPostBody :: T.Text -> T.Text
+cleanPostBody = T.replace "&#x200B;" "" . T.replace "&amp;" "&" . T.replace "&lt;" "<" . T.replace "&gt;" ">"
+
 summarisePostBody :: Post -> T.Text
 summarisePostBody post =
-  let body = postBody post
+  let body = cleanPostBody (postBody post)
       maxWords = 30
       maxChars = 4096 -- Discord API limit
       ws = T.words body
       line = T.unwords ws
-  in if length ws <= maxWords && T.length line <= maxChars
-       then line
-       else
-         if length ws <= maxWords && T.length line > maxChars
-           then T.take (maxChars - 3) line <> "..."
-           else (T.take (maxChars - 3) . T.unwords . take maxWords $ ws) <> "..."
+   in if length ws <= maxWords && T.length line <= maxChars
+        then line
+        else
+          if length ws <= maxWords && T.length line > maxChars
+            then T.take (maxChars - 3) line <> "..."
+            else (T.take (maxChars - 3) . T.unwords . take maxWords $ ws) <> "..."
 
 makeMessageDetails :: Post -> DR.MessageDetailedOpts
 makeMessageDetails post =
