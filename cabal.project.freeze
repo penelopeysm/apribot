@@ -1,6 +1,6 @@
 active-repositories: hackage.haskell.org:merge
-constraints: any.Cabal ==3.8.1.0,
-             any.Cabal-syntax ==3.8.1.0,
+constraints: any.Cabal ==3.6.3.0,
+             Cabal -bundled-binary-generic,
              any.HUnit ==1.6.2.0,
              any.JuicyPixels ==3.3.8,
              JuicyPixels -mmap,
@@ -54,7 +54,7 @@ constraints: any.Cabal ==3.8.1.0,
              any.case-insensitive ==1.2.1.0,
              any.cereal ==0.5.8.3,
              cereal -bytestring-builder,
-             any.clock ==0.8.3,
+             any.clock ==0.8.4,
              clock -llvm,
              any.cmark-gfm ==0.2.5,
              cmark-gfm -pkgconfig,
@@ -246,4 +246,4 @@ constraints: any.Cabal ==3.8.1.0,
              any.xss-sanitize ==0.3.7.2,
              any.zlib ==0.6.3.0,
              zlib -bundled-c-zlib -non-blocking-ffi -pkg-config
-index-state: hackage.haskell.org 2023-07-12T17:43:31Z
+index-state: hackage.haskell.org 2023-07-18T23:35:18Z
