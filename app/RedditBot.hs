@@ -4,7 +4,6 @@ import Config
 import Control.Concurrent (MVar, threadDelay)
 import Control.Concurrent.Chan (Chan)
 import Control.Exception (SomeException, catch)
-import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
