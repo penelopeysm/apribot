@@ -1,11 +1,9 @@
-{-# LANGUAGE DeriveGeneric #-}
-
 module DiscordBot (notifyDiscord, discordBot) where
 
 import Config
 import Control.Concurrent (MVar, forkIO)
 import Control.Concurrent.Chan (Chan, readChan, writeChan)
-import Control.Monad (forever, void, when)
+import Control.Monad (forever, void)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Reader (ask, runReaderT)
 import qualified Data.Text as T
@@ -14,42 +12,9 @@ import Data.Time.Clock (getCurrentTime)
 import Discord
 import qualified Discord.Requests as DR
 import Discord.Types
-import GHC.Generics (Generic)
 import Reddit (Post (..))
 import System.Environment (getEnv)
-import System.Random
-import System.Random.Stateful (globalStdGen, uniformM)
 import Utils
-
--- | Light Blue and Pink don't seem to be available in Discord yet
-data HeartEmoji
-  = Heart
-  | BlueHeart
-  | OrangeHeart
-  | GreenHeart
-  | PurpleHeart
-  | YellowHeart
-  | WhiteHeart
-  | BrownHeart
-  | BlackHeart
-  -- | LightBlueHeart
-  -- | PinkHeart
-  deriving (Eq, Ord, Enum, Bounded, Generic)
-
-instance Uniform HeartEmoji
-
-instance Show HeartEmoji where
-  show Heart          = "\x2764\xFE0F"
-  show BlueHeart      = "\x1F499"
-  show GreenHeart     = "\x1F49A"
-  show YellowHeart    = "\x1F49B"
-  show PurpleHeart    = "\x1F49C"
-  show WhiteHeart     = "\x1F90D"
-  show BrownHeart     = "\x1F90E"
-  show OrangeHeart    = "\x1F9E1"
-  show BlackHeart     = "\x1F5A4"
-  -- show LightBlueHeart = "\x1FA75"
-  -- show PinkHeart      = "\x1FA77"
 
 -- | Run the Discord bot.
 discordBot :: MVar () -> Chan Post -> IO ()
@@ -83,12 +48,6 @@ eventHandler stdoutLock discordChan e = do
     Ready {} -> do
       env <- ask
       liftIO $ void $ forkIO $ runReaderT (notifyLoop discordChan) env
-    MessageCreate m -> do
-      let myUserId = DiscordId $ Snowflake 236863453443260419
-      when (userId (messageAuthor m) == myUserId) $ do
-        randomHeart :: HeartEmoji <- uniformM globalStdGen
-        void . restCall $
-          DR.CreateReaction (messageChannelId m, messageId m) (T.pack $ show randomHeart)
     _ -> liftIO $ atomically stdoutLock $ print e >> putStrLn "" >> putStrLn "" >> pure ()
 
 cleanRedditMarkdown :: T.Text -> T.Text

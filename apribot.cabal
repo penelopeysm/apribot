@@ -85,7 +85,6 @@ executable apribot
                       process,
                       discord-haskell,
                       mtl,
-                      random,
                       async,
                       req
 
