@@ -92,7 +92,7 @@ eventHandler stdoutLock discordChan e = do
     _ -> liftIO $ atomically stdoutLock $ print e >> putStrLn "" >> putStrLn "" >> pure ()
 
 cleanRedditMarkdown :: T.Text -> T.Text
-cleanRedditMarkdown = T.replace "&#x200B;" "" . T.replace "&amp;" "&" . T.replace "&lt;" "<" . T.replace "&gt;" ">"
+cleanRedditMarkdown = T.replace "#" "\\#" . T.replace "&#x200B;" "" . T.replace "&amp;" "&" . T.replace "&lt;" "<" . T.replace "&gt;" ">"
 
 summarisePostBody :: Post -> T.Text
 summarisePostBody post =
