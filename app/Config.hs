@@ -23,8 +23,8 @@ config =
   Config
     { dbFileName = "/data/posts.db",
       tokenDbFileName = "/data/tokens.db",
-      ptradesChannelId = DiscordId $ Snowflake 1130649775339999233,
-      bbeChannelId = DiscordId $ Snowflake 1131020311396098068,
+      ptradesChannelId = DiscordId $ Snowflake 1120783589928345661,
+      bbeChannelId = DiscordId $ Snowflake 1120783566889037834,
       port = thePort,
       userAgent = "github:penelopeysm/apribot by /u/is_a_togekiss",
       redirectUri = "https://apribot.fly.dev/authorised",

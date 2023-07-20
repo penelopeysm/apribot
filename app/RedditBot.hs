@@ -2,13 +2,16 @@ module RedditBot (redditBot) where
 
 import Config
 import Control.Concurrent (MVar, threadDelay)
+import Control.Concurrent.Async (concurrently)
 import Control.Concurrent.Chan (Chan)
-import Control.Exception (SomeException, catch)
+import Control.Exception (catch)
 import Control.Monad.IO.Class (liftIO)
+import Control.Monad.Reader (ask)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Database
 import DiscordBot (notifyDiscord)
+import Network.HTTP.Req (HttpException)
 import Reddit
 import System.IO (stderr)
 import System.Process (readProcess)
@@ -57,9 +60,11 @@ process (stdoutLock, discordChan) post = do
 -- | Fetch posts from pokemontrades and BankBallExchange.
 fetchPosts :: RedditT [Post]
 fetchPosts = do
-  ptr <- subredditPosts 50 "pokemontrades" New
-  bbe <- subredditPosts 50 "BankBallExchange" New
-  pure $ ptr <> bbe
+  env <- ask
+  let ptr = runRedditT' env $ subredditPosts 50 "pokemontrades" New
+      bbe = runRedditT' env $ subredditPosts 50 "BankBallExchange" New
+  (ptrPosts, bbePosts) <- liftIO $ concurrently ptr bbe
+  pure $ ptrPosts <> bbePosts
 
 -- | Thread to stream Reddit posts and process them
 redditBot :: MVar () -> Chan Post -> IO ()
@@ -75,7 +80,7 @@ redditBot stdoutLock discordLock = do
   let loop = do
         catch
           (runRedditT' env $ stream settings process (stdoutLock, discordLock) fetchPosts)
-          ( \(e :: SomeException) -> do
+          ( \(e :: HttpException) -> do
               atomically stdoutLock $ T.hPutStrLn stderr ("Exception: " <> T.pack (show e))
               threadDelay 5000000
               loop

@@ -21,23 +21,35 @@ import System.Random
 import System.Random.Stateful (globalStdGen, uniformM)
 import Utils
 
--- | Others don't seem to work
+-- | Light Blue and Pink don't seem to be available in Discord yet
 data HeartEmoji
   = Heart
   | BlueHeart
+  | OrangeHeart
   | GreenHeart
   | PurpleHeart
   | YellowHeart
+  | WhiteHeart
+  | BrownHeart
+  | BlackHeart
+  -- | LightBlueHeart
+  -- | PinkHeart
   deriving (Eq, Ord, Enum, Bounded, Generic)
 
 instance Uniform HeartEmoji
 
 instance Show HeartEmoji where
-  show Heart = "heart"
-  show BlueHeart = "blue_heart"
-  show GreenHeart = "green_heart"
-  show PurpleHeart = "purple_heart"
-  show YellowHeart = "yellow_heart"
+  show Heart          = "\x2764\xFE0F"
+  show BlueHeart      = "\x1F499"
+  show GreenHeart     = "\x1F49A"
+  show YellowHeart    = "\x1F49B"
+  show PurpleHeart    = "\x1F49C"
+  show WhiteHeart     = "\x1F90D"
+  show BrownHeart     = "\x1F90E"
+  show OrangeHeart    = "\x1F9E1"
+  show BlackHeart     = "\x1F5A4"
+  -- show LightBlueHeart = "\x1FA75"
+  -- show PinkHeart      = "\x1FA77"
 
 -- | Run the Discord bot.
 discordBot :: MVar () -> Chan Post -> IO ()
@@ -47,7 +59,7 @@ discordBot stdoutLock discordChan = do
     runDiscord $
       def
         { discordToken = discordToken,
-          discordOnEvent = eventHandler discordChan,
+          discordOnEvent = eventHandler stdoutLock discordChan,
           discordOnStart = liftIO $ atomically stdoutLock $ putStrLn "Starting Discord bot..."
         }
   atomically stdoutLock $ T.putStrLn err
@@ -65,8 +77,8 @@ notifyDiscord discordChan post = do
 -- 2. Responds to messages from myself. This will be removed at some point in
 --    time, but the idea is that we might want to respond to other events in the
 --    future.
-eventHandler :: Chan Post -> Event -> DiscordHandler ()
-eventHandler discordChan e = do
+eventHandler :: MVar () -> Chan Post -> Event -> DiscordHandler ()
+eventHandler stdoutLock discordChan e = do
   case e of
     Ready {} -> do
       env <- ask
@@ -77,14 +89,14 @@ eventHandler discordChan e = do
         randomHeart :: HeartEmoji <- uniformM globalStdGen
         void . restCall $
           DR.CreateReaction (messageChannelId m, messageId m) (T.pack $ show randomHeart)
-    _ -> pure ()
+    _ -> liftIO $ atomically stdoutLock $ print e >> putStrLn "" >> putStrLn "" >> pure ()
 
-cleanPostBody :: T.Text -> T.Text
-cleanPostBody = T.replace "&#x200B;" "" . T.replace "&amp;" "&" . T.replace "&lt;" "<" . T.replace "&gt;" ">"
+cleanRedditMarkdown :: T.Text -> T.Text
+cleanRedditMarkdown = T.replace "&#x200B;" "" . T.replace "&amp;" "&" . T.replace "&lt;" "<" . T.replace "&gt;" ">"
 
 summarisePostBody :: Post -> T.Text
 summarisePostBody post =
-  let body = cleanPostBody (postBody post)
+  let body = cleanRedditMarkdown (postBody post)
       maxWords = 30
       maxChars = 4096 -- Discord API limit
       ws = T.words body
@@ -99,13 +111,14 @@ summarisePostBody post =
 makeMessageDetails :: Post -> DR.MessageDetailedOpts
 makeMessageDetails post =
   let maxTitleLength = 256 -- Discord API limit
-      embedTitle = if T.length (postTitle post) > maxTitleLength then T.take (maxTitleLength - 3) (postTitle post) <> "..." else postTitle post
+      title = cleanRedditMarkdown (postTitle post)
+      truncatedTitle = if T.length title > maxTitleLength then T.take (maxTitleLength - 3) title <> "..." else title
    in def
         { DR.messageDetailedEmbeds =
             Just
               [ def
                   { createEmbedUrl = postUrl post,
-                    createEmbedTitle = embedTitle,
+                    createEmbedTitle = truncatedTitle,
                     createEmbedDescription = summarisePostBody post,
                     createEmbedAuthorName = "/u/" <> postAuthor post,
                     createEmbedAuthorUrl = "https://reddit.com/u/" <> postAuthor post,

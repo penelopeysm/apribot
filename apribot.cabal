@@ -85,7 +85,9 @@ executable apribot
                       process,
                       discord-haskell,
                       mtl,
-                      random
+                      random,
+                      async,
+                      req
 
     -- Directories containing source files.
     hs-source-dirs:   app

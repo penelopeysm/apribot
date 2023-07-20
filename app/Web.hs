@@ -413,11 +413,11 @@ yourVotesHtml totalLabelledByUser username votes = do
 
 -- | Thread for the web server
 web :: MVar () -> IO ()
-web lock = do
+web stdoutLock = do
   clientId <- getEnvAsText "REDDIT_FE_ID"
   clientSecret <- getEnvAsText "REDDIT_FE_SECRET"
   staticDir <- getDataFileName "static"
-  atomically lock $ printf "Launching web server on port %d...\n" (port config)
+  atomically stdoutLock $ printf "Launching web server on port %d...\n" (port config)
 
   S.scotty (port config) $ do
     S.get "/" $ do
