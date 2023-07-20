@@ -69,11 +69,10 @@ import Utils
 
 -- | Add a post to the SQLite database. The Bool parameter indicates whether it
 -- was a hit or not.
-addToDb :: Post -> Bool -> IO ()
-addToDb post hit = do
-  sql <- getDataFileName (dbFileName config) >>= open
+addToDb :: Post -> Bool -> Connection -> IO ()
+addToDb post hit conn = do
   executeNamed
-    sql
+    conn
     "INSERT INTO posts (id, url, title, body, submitter, hit, time, flair) \
     \ VALUES (:id, :url, :title, :body, :submitter, :hit, :time, :flair)"
     [ ":id" := unPostID (postId post),
@@ -85,9 +84,6 @@ addToDb post hit = do
       ":time" := formatTime defaultTimeLocale "%F %T" (postCreatedTime post),
       ":flair" := fromMaybe "" (postFlairText post)
     ]
-  n <- fromOnly . head <$> (query_ sql "SELECT COUNT(*) FROM posts;" :: IO [Only Int])
-  close sql
-  printf "Added post to database (%d total posts)\n" n
 
 getLatestHits :: Int -> Connection -> IO [(Text, Text, Text, Text, Text, Text)]
 getLatestHits n conn =

@@ -48,7 +48,7 @@ eventHandler stdoutLock discordChan e = do
     Ready {} -> do
       env <- ask
       liftIO $ void $ forkIO $ runReaderT (notifyLoop discordChan) env
-    _ -> liftIO $ atomically stdoutLock $ print e >> putStrLn "" >> putStrLn "" >> pure ()
+    _ -> liftIO $ atomically stdoutLock $ print e >> putStrLn "" >> putStrLn ""
 
 cleanRedditMarkdown :: T.Text -> T.Text
 cleanRedditMarkdown = T.replace "#" "\\#" . T.replace "&#x200B;" "" . T.replace "&amp;" "&" . T.replace "&lt;" "<" . T.replace "&gt;" ">"

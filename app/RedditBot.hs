@@ -10,6 +10,7 @@ import Control.Monad.Reader (ask)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Database
+import Database.SQLite.Simple (withConnection)
 import DiscordBot (notifyDiscord)
 import Network.HTTP.Req (HttpException)
 import Reddit
@@ -40,20 +41,22 @@ process (stdoutLock, discordChan) post = do
       if hit
         then do
           liftIO $ do
-            addToDb post True
-            notifyDiscord discordChan post
             atomically stdoutLock $
               printf "PTR Hit: %s\n%s\n%s\n" (unPostID (postId post)) (postTitle post) (postUrl post)
+            sqlFileName <- getSqlFileName
+            withConnection sqlFileName $ addToDb post True
+            notifyDiscord discordChan post
         else do
           liftIO $ do
-            addToDb post False
             atomically stdoutLock $
               printf "PTR Non-hit: %s\n%s\n%s\n" (unPostID (postId post)) (postTitle post) (postUrl post)
+            sqlFileName <- getSqlFileName
+            withConnection sqlFileName $ addToDb post False
     "bankballexchange" -> do
       liftIO $ do
-        notifyDiscord discordChan post
         atomically stdoutLock $
           printf "BBE: %s\n%s\n%s\n" (unPostID (postId post)) (postTitle post) (postUrl post)
+        notifyDiscord discordChan post
     _ -> pure ()
   pure (stdoutLock, discordChan)
 
