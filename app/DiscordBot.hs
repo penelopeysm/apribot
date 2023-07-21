@@ -8,7 +8,7 @@ import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Reader (ask, runReaderT)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
-import Data.Time.Clock (getCurrentTime)
+import Data.Time.Clock.System (getSystemTime, systemSeconds)
 import Discord
 import qualified Discord.Requests as DR
 import Discord.Types
@@ -93,23 +93,10 @@ makeMessageDetails post =
 notifyLoop :: Chan Post -> DiscordHandler ()
 notifyLoop discordChan = do
   -- Notify that the bot has started, in my private channel.
-  now <- liftIO getCurrentTime
-  void . restCall $
-    DR.CreateMessageDetailed
-      (DiscordId $ Snowflake 1130599509689384963)
-      ( def
-          { DR.messageDetailedEmbeds =
-              Just
-                [ def
-                    { createEmbedTitle = "ApriBot startup notification",
-                      createEmbedDescription = "Hello, I'm awake! :heart:",
-                      createEmbedColor = Just DiscordColorLuminousVividPink,
-                      createEmbedTimestamp = Just now
-                    }
-                ],
-            DR.messageDetailedContent = ""
-          }
-      )
+  now <- systemSeconds <$> liftIO getSystemTime
+  -- Use discord timestamp format
+  void . restCall $ 
+    DR.CreateMessage (DiscordId $ Snowflake 1132000877415247903) ("ApriBot started at: <t:" <> T.pack (show now) <> ">")
   forever $ do
     post <- liftIO $ readChan discordChan
     case T.toLower (postSubreddit post) of
