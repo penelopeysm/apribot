@@ -1,11 +1,8 @@
 module DiscordBot (notifyDiscord, discordBot) where
 
-import Config
-import Control.Concurrent (MVar, forkIO)
+import Control.Concurrent (forkIO)
 import Control.Concurrent.Chan (Chan, readChan, writeChan)
-import Control.Monad (forever, void, when)
-import Control.Monad.IO.Class (liftIO)
-import Control.Monad.Reader (ask, runReaderT)
+import Control.Monad.Reader (runReaderT)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Data.Time.Clock.System (getSystemTime, systemSeconds)
@@ -13,21 +10,24 @@ import Discord
 import qualified Discord.Requests as DR
 import Discord.Types
 import Reddit (Post (..))
-import System.Environment (getEnv)
-import Utils
+import Trans
 
 -- | Run the Discord bot.
-discordBot :: MVar () -> Chan Post -> IO ()
-discordBot stdoutLock discordChan = do
-  discordToken <- T.pack <$> getEnv "DISCORD_APRIBOT_TOKEN"
+discordBot :: App IO ()
+discordBot = do
+  discordToken <- asks cfgDiscordToken
+  cfg <- ask
+  lock <- asks cfgLock
+
   err <-
-    runDiscord $
-      def
-        { discordToken = discordToken,
-          discordOnEvent = eventHandler stdoutLock discordChan,
-          discordOnStart = liftIO $ atomically stdoutLock $ putStrLn "Starting Discord bot..."
-        }
-  atomically stdoutLock $ T.putStrLn err
+    liftIO $
+      runDiscord $
+        def
+          { discordToken = discordToken,
+            discordOnEvent = eventHandler cfg,
+            discordOnStart = atomicallyWith lock $ putStrLn "Starting Discord bot..."
+          }
+  atomically $ T.putStrLn err
 
 -- | This function is exported to allow the Reddit bot to talk to this module.
 -- It adds the post to the MVar, which effectively triggers channelLoop to post
@@ -42,32 +42,17 @@ notifyDiscord discordChan post = do
 -- 2. Responds to messages from myself. This will be removed at some point in
 --    time, but the idea is that we might want to respond to other events in the
 --    future.
-eventHandler :: MVar () -> Chan Post -> Event -> DiscordHandler ()
-eventHandler stdoutLock discordChan e = do
+eventHandler :: Config -> Event -> DiscordHandler ()
+eventHandler cfg e = do
+  let lock = cfgLock cfg
   -- Print the event
-  liftIO $ atomically stdoutLock $ print e >> putStrLn "" >> putStrLn ""
+  atomicallyWith lock $ print e >> putStrLn "" >> putStrLn ""
   case e of
     -- Begin notification loop
     Ready {} -> do
       env <- ask
-      liftIO $ void $ forkIO $ runReaderT (notifyLoop discordChan) env
-    -- Delete a message when a trusted user reacts with :thumbsdown: to it, or
-    -- when there are more than 3 thumbs down
-    MessageReactionAdd (ReactionInfo userId _ channelId messageId emoji) -> do
-      let thumbsDown = "\x1f44e"
-      let thumbsDownThreshold = 3
-      thumbsDownReacts <- restCall $ DR.GetReactions (channelId, messageId) thumbsDown (thumbsDownThreshold, DR.LatestReaction)
-      let nThumbsDown = case thumbsDownReacts of
-            Right rs -> length rs
-            Left _ -> 0
-      let toDelete =
-            (nThumbsDown >= 3)
-              || ( (userId `elem` trustedDiscordUsers config)
-                     && (emojiName emoji == thumbsDown)
-                     && (channelId `elem` [ptradesChannelId config, bbeChannelId config])
-                 )
-      when toDelete $ void $ restCall $ DR.DeleteMessage (channelId, messageId)
-    -- Ignore other events
+      liftIO $ void $ forkIO $ runReaderT (notifyLoop cfg) env
+    -- Ignore other events (for now)
     _ -> pure ()
 
 cleanRedditMarkdown :: T.Text -> T.Text
@@ -97,11 +82,16 @@ summarisePostBody post =
 
 makeMessageDetails :: Post -> DR.MessageDetailedOpts
 makeMessageDetails post =
-  let footerText = case mbHead (postCrosspostParents post) of
-        Nothing -> "by /u/" <> postAuthor post
-        Just xpost -> "xposted from /r/" <> postSubreddit xpost <> "by /u/" <> postAuthor xpost
+  let (footerText, flair) = case mbHead (postCrosspostParents post) of
+        Nothing -> ("by /u/" <> postAuthor post, postFlairText post)
+        Just xpost ->
+          ( "xposted from /r/" <> postSubreddit xpost <> "\nby /u/" <> postAuthor xpost,
+            postFlairText xpost
+          )
       maxTitleLength = 256 -- Discord API limit
-      title = cleanRedditMarkdown (postTitle post)
+      title = case flair of
+        Nothing -> cleanRedditMarkdown (postTitle post)
+        Just f -> " [" <> f <> "] " <> cleanRedditMarkdown (postTitle post)
       truncatedTitle = if T.length title > maxTitleLength then T.take (maxTitleLength - 3) title <> "..." else title
    in def
         { DR.messageDetailedEmbeds =
@@ -120,24 +110,25 @@ makeMessageDetails post =
 
 -- | Loop which waits for a post to be added to the MVar. When one is added (via
 -- the 'notifyDiscord' function), this posts it to the Discord channel.
-notifyLoop :: Chan Post -> DiscordHandler ()
-notifyLoop discordChan = do
+notifyLoop :: Config -> DiscordHandler ()
+notifyLoop cfg = do
   -- Notify that the bot has started, in my private channel.
   now <- systemSeconds <$> liftIO getSystemTime
-  -- Use discord timestamp format
   void . restCall $
     DR.CreateMessage 1132000877415247903 ("ApriBot started at: <t:" <> T.pack (show now) <> ">")
+
+  let chan = cfgChan cfg
   forever $ do
-    post <- liftIO $ readChan discordChan
+    post <- liftIO $ readChan chan
     case T.toLower (postSubreddit post) of
       "pokemontrades" ->
         void . restCall $
           DR.CreateMessageDetailed
-            (ptradesChannelId config)
+            (cfgPtrChannelId cfg)
             (makeMessageDetails post)
       "bankballexchange" ->
         void . restCall $
           DR.CreateMessageDetailed
-            (bbeChannelId config)
+            (cfgBbeChannelId cfg)
             (makeMessageDetails post)
       _ -> pure ()

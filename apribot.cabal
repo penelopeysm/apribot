@@ -58,35 +58,46 @@ executable apribot
     -- Import common warning flags.
     import:           warnings
 
-    default-extensions: OverloadedStrings, RecordWildCards, ScopedTypeVariables
+    default-extensions: OverloadedStrings,
+                        RecordWildCards,
+                        ScopedTypeVariables,
+                        GeneralizedNewtypeDeriving,
 
     -- .hs or .lhs file containing the Main module.
     main-is:          Main.hs
 
     -- Modules included in this executable, other than Main.
-    other-modules:    Paths_apribot, Web, Config, Utils, Database, DiscordBot, RedditBot
+    other-modules:    Config,
+                      Database,
+                      DiscordBot,
+                      Paths_apribot,
+                      RedditBot,
+                      Trans,
+                      Utils,
+                      Web,
 
     -- Other library packages from which modules are imported.
     build-depends:    base,
-                      text,
-                      reddit-oauth2,
-                      containers,
-                      sqlite-simple,
-                      scotty,
-                      cookie,
-                      scotty-cookie,
-                      lucid,
-                      time,
-                      random,
-                      password,
+                      async,
                       bytestring,
                       cmark-gfm,
-                      xss-sanitize,
-                      process,
+                      containers,
+                      cookie,
                       discord-haskell,
+                      lucid,
                       mtl,
-                      async,
-                      req
+                      password,
+                      process,
+                      random,
+                      reddit-oauth2,
+                      req,
+                      scotty,
+                      scotty-cookie,
+                      sqlite-simple,
+                      text,
+                      time,
+                      transformers,
+                      xss-sanitize,
 
     -- Directories containing source files.
     hs-source-dirs:   app

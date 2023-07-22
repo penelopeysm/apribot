@@ -1,36 +1,82 @@
-module Config (Config (..), config) where
+module Config (Config (..), getConfig) where
 
-import Discord.Types
+import Control.Concurrent.Chan (Chan, newChan)
+import Control.Concurrent.MVar (MVar, newMVar)
+import Data.Maybe (isJust)
 import Data.Text (Text)
+import qualified Data.Text as T
+import Discord.Types
+import Paths_apribot (getDataFileName)
+import Reddit (Post)
+import System.Environment (getEnv, lookupEnv)
 
 data Config = Config
-  { dbFileName :: FilePath,
-    tokenDbFileName :: FilePath,
-    ptradesChannelId :: ChannelId,
-    bbeChannelId :: ChannelId,
-    port :: Int,
-    userAgent :: Text,
-    redirectUri :: Text,
-    pythonClassifier :: FilePath,
-    trustedDiscordUsers :: [UserId]
+  { -- | Path to the posts.db SQLite database file.
+    cfgPostsDbPath :: FilePath,
+    -- | Path to the tokens.db SQLite database file.
+    cfgTokensDbPath :: FilePath,
+    -- | Path to web app static directory
+    cfgStaticDir :: FilePath,
+    -- | Discord channel to post /r/pokemontrades posts to.
+    cfgPtrChannelId :: ChannelId,
+    -- | Discord channel to post /r/bankballexchange posts to.
+    cfgBbeChannelId :: ChannelId,
+    -- | Port to listen on.
+    cfgPort :: Int,
+    -- | User agent to use for Reddit API requests.
+    cfgUserAgent :: Text,
+    -- | Redirect URI for OAuth2.
+    cfgRedirectUri :: Text,
+    -- | Path to the Python classifier script.
+    cfgClassifierPath :: FilePath,
+    -- | Discord token (set via $DISCORD_APRIBOT_TOKEN)
+    cfgDiscordToken :: Text,
+    -- | Reddit ID for crawler (set via $REDDIT_ID)
+    cfgRedditId :: Text,
+    -- | Reddit secret for crawler (set via $REDDIT_SECRET)
+    cfgRedditSecret :: Text,
+    -- | Reddit ID for web app (set via $REDDIT_FE_ID)
+    cfgRedditFrontendId :: Text,
+    -- | Reddit secret for web app (set via $REDDIT_FE_SECRET)
+    cfgRedditFrontendSecret :: Text,
+    -- | Reddit username for the bot (/u/ApriBot, but set via $REDDIT_USERNAME)
+    cfgRedditUsername :: Text,
+    -- | Reddit password for the bot (set via $REDDIT_PASSWORD)
+    cfgRedditPassword :: Text,
+    -- | Lock to prevent multiple threads writing to stdout at once.
+    cfgLock :: MVar (),
+    -- | Channel to pass posts to Discord.
+    cfgChan :: Chan Post
   }
 
-thePort :: Int
-thePort = 8080
+isOnFly :: IO Bool
+isOnFly = isJust <$> lookupEnv "FLY_APP_NAME"
 
 -- | App configuration.
-config :: Config
-config =
-  Config
-    { dbFileName = "/data/posts.db",
-      tokenDbFileName = "/data/tokens.db",
-      ptradesChannelId = 1120783589928345661,
-      bbeChannelId = 1120783566889037834,
-      port = thePort,
-      userAgent = "github:penelopeysm/apribot by /u/is_a_togekiss",
-      redirectUri = "https://apribot.fly.dev/authorised",
-      -- redirectUri = T.pack (printf "http://localhost:%d/authorised" thePort),
-      pythonClassifier = "python/predict.py",
-      -- right now only me
-      trustedDiscordUsers = [236863453443260419]
-    }
+getConfig :: IO Config
+getConfig = do
+  onFly <- isOnFly
+  cfgDiscordToken <- T.pack <$> getEnv "DISCORD_APRIBOT_TOKEN"
+  cfgRedditId <- T.pack <$> getEnv "REDDIT_ID"
+  cfgRedditSecret <- T.pack <$> getEnv "REDDIT_SECRET"
+  cfgRedditFrontendId <- T.pack <$> getEnv "REDDIT_FE_ID"
+  cfgRedditFrontendSecret <- T.pack <$> getEnv "REDDIT_FE_SECRET"
+  cfgRedditUsername <- T.pack <$> getEnv "REDDIT_USERNAME"
+  cfgRedditPassword <- T.pack <$> getEnv "REDDIT_PASSWORD"
+  cfgStaticDir <- getDataFileName "static"
+
+  cfgPostsDbPath <- getDataFileName "data/posts.db"
+  cfgTokensDbPath <- getDataFileName "data/tokens.db"
+  cfgClassifierPath <- getDataFileName "python/predict.py"
+
+  let cfgPtrChannelId = 1120783589928345661
+      cfgBbeChannelId = 1120783566889037834
+      cfgPort = 8080
+      cfgUserAgent = "github:penelopeysm/apribot by /u/is_a_togekiss"
+      cfgRedirectUri =
+        if onFly
+          then "https://apribot.fly.dev/authorised"
+          else "http://localhost:8080/authorised"
+  cfgLock <- newMVar ()
+  cfgChan <- newChan
+  pure $ Config {..}

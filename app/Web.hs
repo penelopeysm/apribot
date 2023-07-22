@@ -1,29 +1,28 @@
 module Web (web) where
 
 import CMarkGFM
-import Config
 import Control.Applicative (liftA2)
-import Control.Concurrent (MVar)
 import Control.Exception (SomeException, try)
-import Control.Monad.IO.Class (liftIO)
+import Data.List (intersperse)
 import Data.Password.Bcrypt
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Lazy (fromStrict)
+import qualified Data.Text.Lazy as TL
 import Data.Time.Clock (secondsToDiffTime)
 import Database
 import Database.SQLite.Simple
 import Lucid
-import Paths_apribot (getDataFileName)
 import Reddit
 import Reddit.Auth (Token (..))
 import Text.HTML.SanitizeXSS (sanitizeBalance)
 import Text.Printf (printf)
+import Trans
 import Utils
 import qualified Web.Cookie as C
-import qualified Web.Scotty as S
 import qualified Web.Scotty.Cookie as SC
+import qualified Web.Scotty.Trans as ST
 
 hashedStateCookieName :: Text
 hashedStateCookieName = "apribotOauth2State"
@@ -31,21 +30,22 @@ hashedStateCookieName = "apribotOauth2State"
 tokenCookieName :: Text
 tokenCookieName = "apribotToken"
 
--- * Storage of OAuth2 tokens in memory
-
 -- * Generating RedditEnv values to use
 
 -- | Retrieve token-identifier cookie, and thus the token from the database, if
 -- the user has one.
-retrieveRedditEnv :: S.ActionM (Maybe RedditEnv)
+retrieveRedditEnv :: ST.ActionT TL.Text (App IO) (Maybe RedditEnv)
 retrieveRedditEnv = do
+  userAgent <- asks cfgUserAgent
+  tokensSql <- asks cfgTokensDbPath
+
   maybeCookie <- SC.getCookie tokenCookieName
   case maybeCookie of
     Nothing -> pure Nothing
     Just sessionId -> do
-      maybeToken <- liftIO $ getToken sessionId
+      maybeToken <- liftIO $ withConnection tokensSql $ getToken sessionId
       case maybeToken of
-        Just t -> Just <$> liftIO (mkEnvFromToken t (userAgent config))
+        Just t -> Just <$> liftIO (mkEnvFromToken t userAgent)
         Nothing -> pure Nothing
 
 -- | Make a new RedditEnv by requesting a token. This is to be used on the
@@ -53,14 +53,17 @@ retrieveRedditEnv = do
 -- granting access on Reddit (i.e. the URI query params contains an
 -- authorisation code which can be used to request an access token). If the
 -- params are not present then this redirects the user back to "/".
-makeNewRedditEnv :: Text -> Text -> Text -> S.ActionM ()
-makeNewRedditEnv clientId clientSecret redirectUri = do
+makeNewRedditEnv :: ST.ActionT TL.Text (App IO) ()
+makeNewRedditEnv = do
+  cfg <- ask
+  tokensSql <- asks cfgTokensDbPath
+
   -- Retrieve stored state from the cookie
   hashedState <- fmap PasswordHash <$> SC.getCookie hashedStateCookieName
   -- Get the authentication code and state from the URI query parameters, and
   -- check that they're correct
-  authCodeMaybe <- (Just <$> S.param "code") `S.rescue` const (pure Nothing)
-  returnedState <- (Just <$> S.param "state") `S.rescue` const (pure Nothing)
+  authCodeMaybe <- (Just <$> ST.param "code") `ST.rescue` const (pure Nothing)
+  returnedState <- (Just <$> ST.param "state") `ST.rescue` const (pure Nothing)
   case (authCodeMaybe, liftA2 checkPassword (mkPassword <$> returnedState) hashedState) of
     (Just authCode, Just PasswordCheckSuccess) -> do
       -- Get rid of the state
@@ -68,12 +71,12 @@ makeNewRedditEnv clientId clientSecret redirectUri = do
       -- Authenticate using the code that we just got
       let creds =
             CodeGrantCredentials
-              { codeGrantClientId = clientId,
-                codeGrantClientSecret = clientSecret,
-                codeGrantRedirectUri = redirectUri,
+              { codeGrantClientId = cfgRedditFrontendId cfg,
+                codeGrantClientSecret = cfgRedditFrontendSecret cfg,
+                codeGrantRedirectUri = cfgRedirectUri cfg,
                 codeGrantCode = authCode
               }
-      env <- liftIO $ authenticate creds (userAgent config)
+      env <- liftIO $ authenticate creds (cfgUserAgent cfg)
       t <- liftIO $ runRedditT' env getTokenFromEnv
       -- Generate a random session ID for the user and store it in a cookie
       sessionId <- liftIO $ randomText 60
@@ -86,39 +89,47 @@ makeNewRedditEnv clientId clientSecret redirectUri = do
             C.setCookieSecure = True
           }
       -- Store the token in the database using this session ID
-      liftIO $ addToken sessionId t
+      liftIO $ withConnection tokensSql $ addToken sessionId t
     _ -> do
-      S.redirect "auth_error"
+      ST.redirect "auth_error"
 
 -- | Deletes all cookies and the corresponding token from the database (if it
 -- exists)
-cleanup :: S.ActionM ()
+cleanup :: ST.ActionT TL.Text (App IO) ()
 cleanup = do
+  tokensSql <- asks cfgTokensDbPath
   maybeCookie <- SC.getCookie tokenCookieName
   case maybeCookie of
     Just cookie -> do
-      liftIO $ removeToken cookie
+      liftIO $ withConnection tokensSql $ removeToken cookie
       SC.deleteCookie tokenCookieName
       SC.deleteCookie hashedStateCookieName
     Nothing -> pure ()
 
 -- * HTML helpers
 
-tableHeaderSql :: Html ()
-tableHeaderSql =
-  tr_ $ mapM_ (th_ . toHtml) ["Post ID" :: Text, "Time (UTC)", "Submitter", "Flair", "Title"]
+data NavigationLink = Home | Contribute | YourVotes | Privacy | Logout
 
-makeTableRowFromSql :: (Text, Text, Text, Text, Text, Text) -> Html ()
-makeTableRowFromSql (pid, purl, ptitle, psubmitter, ptime, pflair) =
-  tr_ $ do
-    mapM_
-      td_
-      [ code_ (toHtml pid),
-        toHtml ptime,
-        toHtml ("/u/" <> psubmitter),
-        toHtml pflair
-      ]
-    td_ [class_ "post-title"] $ a_ [href_ purl] $ toHtmlRaw $ sanitizeBalance ptitle
+getRouteDesc :: NavigationLink -> (Text, Text)
+getRouteDesc Home = ("/", "home")
+getRouteDesc Contribute = ("/contribute", "contribute")
+getRouteDesc YourVotes = ("/your_votes", "view your votes")
+getRouteDesc Privacy = ("/privacy", "privacy")
+getRouteDesc Logout = ("/logout", "logout")
+
+mkLinkHtml :: NavigationLink -> Html ()
+mkLinkHtml link =
+  let (route, desc) = getRouteDesc link
+   in a_ [href_ route] (toHtml desc)
+
+navigation :: [NavigationLink] -> Html ()
+navigation links = do
+  p_ $ i_ $ do
+    "("
+    sequence_ . intersperse " — " $ map mkLinkHtml links
+    ")"
+
+-- * HTML that is served
 
 -- | Reusable <head> element lead element for HTML page
 headHtml :: Maybe Text -> Bool -> Html ()
@@ -136,7 +147,7 @@ headHtml titleExtra withJS = do
 
 -- | Error HTML
 errorHtml :: SomeException -> Html ()
-errorHtml e = do
+errorHtml e = doctypehtml_ $ do
   headHtml (Just "Error") False
   body_ $ do
     h1_ "An error occurred :("
@@ -148,18 +159,30 @@ errorHtml e = do
       "."
     p_ $ code_ $ toHtml $ show e
 
--- * HTML that is actually served
-
 -- | HTML for the main page
-mainHtml :: IO (Html ())
+mainHtml :: App IO (Html ())
 mainHtml = do
-  sqlFileName <- getSqlFileName
-  (hits, nonhits, n, m) <- liftIO $ withConnection sqlFileName $ \sql -> do
+  postsSql <- asks cfgPostsDbPath
+  (hits, nonhits, n, m) <- liftIO $ withConnection postsSql $ \sql -> do
     hits <- getLatestHits 50 sql
     nonhits <- getLatestNonHits 50 sql
     n <- getTotalMLAssignedRows sql
     m <- getTotalMLAssignedHits sql
     pure (hits, nonhits, n, m)
+  let tblHeader :: Html ()
+      tblHeader =
+        tr_ $ mapM_ (th_ . toHtml) ["Post ID" :: Text, "Time (UTC)", "Submitter", "Flair", "Title"]
+  let tblRow :: (Text, Text, Text, Text, Text, Text) -> Html ()
+      tblRow (pid, purl, ptitle, psubmitter, ptime, pflair) =
+        tr_ $ do
+          mapM_
+            td_
+            [ code_ (toHtml pid),
+              toHtml ptime,
+              toHtml ("/u/" <> psubmitter),
+              toHtml pflair
+            ]
+          td_ [class_ "post-title"] $ a_ [href_ purl] $ toHtmlRaw $ sanitizeBalance ptitle
 
   pure $ doctypehtml_ $ do
     headHtml Nothing False
@@ -169,25 +192,20 @@ mainHtml = do
         p_ $ do
           "ApriBot monitors new posts on the "
           a_ [href_ "https://reddit.com/r/pokemontrades"] "/r/pokemontrades"
-          " subreddit and identifies potential Aprimon-related threads, using a machine learning algorithm trained on 7709 "
-          a_ [href_ "/contribute"] "manually labelled"
-          " posts from /r/pokemontrades."
+          " subreddit and identifies potential Aprimon-related threads, using a machine learning algorithm trained on manually labelled /r/pokemontrades posts."
         p_ $ do
           toHtml (printf "So far, ApriBot's new algorithm has processed a total of %d posts," n :: String)
           toHtml (printf " of which %d were hits (%.2f%%)." m (100 * fromIntegral m / fromIntegral n :: Double) :: String)
           " This page shows you the most recent 50 hits and non-hits, ordered by most recent first."
         p_ $ do
           "ApriBot is implemented with Haskell and SQLite; the ML bits are written in Python."
-          " If you’re interested, its source code is on "
-          a_ [href_ "https://github.com/penelopeysm/apribot"] "GitHub"
-          ". (Issues and pull requests are welcome!) "
-          "If you have any questions about ApriBot, feel free to get in touch with me, either via "
+          " If you have any questions about ApriBot, feel free to get in touch with me, either via "
           a_ [href_ "https://github.com/penelopeysm/apribot"] "GitHub"
           " or "
           a_ [href_ "https://reddit.com/u/is_a_togekiss"] "Reddit"
           "."
         p_ $ do
-          b_ "While the current algorithm has quite good performance (>93% cross-validation F1 score), I might be able to make it even better in the future with more data."
+          b_ "While the current algorithm has pretty decent performance, I might be able to make it even better in the future with more data."
           " If you are interested and have a few minutes to spare, do head over to the "
           a_ [href_ "/contribute"] "contribute page"
           "—I will be very grateful!"
@@ -195,37 +213,29 @@ mainHtml = do
       if null hits
         then p_ "None so far!"
         else table_ $ do
-          thead_ tableHeaderSql
-          tbody_ $ mapM_ makeTableRowFromSql (take 50 hits)
+          thead_ tblHeader
+          tbody_ $ mapM_ tblRow (take 50 hits)
       h2_ "Non-hits"
       if null nonhits
         then p_ "None so far!"
         else table_ $ do
-          thead_ tableHeaderSql
-          tbody_ $ mapM_ makeTableRowFromSql (take 50 nonhits)
+          thead_ tblHeader
+          tbody_ $ mapM_ tblRow (take 50 nonhits)
 
 logoutHtml :: Html ()
-logoutHtml = do
+logoutHtml = doctypehtml_ $ do
   headHtml (Just "Logged out") False
   body_ $ main_ $ do
     h1_ "Logged out"
+    navigation [Home, Contribute, Privacy]
     p_ "You have been logged out. Thank you so much for your time!"
-    p_ $ do
-      "Return to the "
-      a_ [href_ "/"] "home page"
-      ", or the "
-      a_ [href_ "/contribute"] "contribute page"
-      "."
 
 privacyHtml :: Html ()
-privacyHtml = do
+privacyHtml = doctypehtml_ $ do
   headHtml (Just "Privacy") False
   body_ $ main_ $ do
     h1_ "Privacy"
-    p_ $ i_ $ do
-      "("
-      a_ [href_ "/contribute"] "back to contribute page"
-      ")"
+    navigation [Home, Contribute]
     h2_ "Personal information"
     p_ $ do
       "The only personal information ApriBot stores about you is your Reddit username (on posts which you have labelled). "
@@ -246,7 +256,7 @@ privacyHtml = do
       "."
 
 authErrorHtml :: Html ()
-authErrorHtml = do
+authErrorHtml = doctypehtml_ $ do
   headHtml (Just "Error") False
   body_ $ main_ $ do
     h1_ "Authentication error :("
@@ -256,7 +266,7 @@ authErrorHtml = do
     p_ $ a_ [href_ "/contribute"] "Please try again, and let me know if it still doesn't work."
 
 contribErrorHtml :: Html ()
-contribErrorHtml = do
+contribErrorHtml = doctypehtml_ $ do
   headHtml (Just "Error") False
   body_ $ main_ $ do
     h1_ "Form submission error :("
@@ -264,102 +274,106 @@ contribErrorHtml = do
       "Sorry! There was an error recording your vote. "
     p_ $ a_ [href_ "/contribute"] "Please try again, and let me know if it still doesn't work."
 
-contributingLoggedOutHtml :: Int -> Int -> Html ()
-contributingLoggedOutHtml totalPosts labelledPosts = do
-  headHtml (Just "Contributing") False
-  body_ $ main_ $ do
-    h1_ "Contribute"
-    p_ $ i_ $ do
-      "("
-      a_ [href_ "/"] "back to home page"
-      " — "
-      a_ [href_ "/privacy"] "privacy"
-      ")"
-    p_ $ do
-      "Machine learning algorithms, such as the one ApriBot uses, need to be trained on "
-      i_ "labelled data"
-      ": that is, posts which have been manually classified (by experts—yes, that's you!) as being either Aprimon-related or not. "
-      "Right now, out of a total of "
-      toHtml (show totalPosts)
-      " posts, "
-      toHtml (show labelledPosts)
-      " have been labelled; 7709 of these were used to train ApriBot's current algorithm. "
-      "If you have a few minutes to spare, please consider helping me out by increasing this number!"
-    div_ [id_ "login-link-container"] $ do
-      a_ [href_ "/login", id_ "login-link"] "Log in with Reddit"
-    p_ $ do
-      b_ "ApriBot uses cookies only to log you in and to keep you logged in. "
-      b_ "By logging in, it is assumed that you consent to this. "
-      "See the "
-      a_ [href_ "/privacy"] "privacy page"
-      " for more information."
+contributingLoggedOutHtml' :: App IO (Html ())
+contributingLoggedOutHtml' = do
+  postsSql <- asks cfgPostsDbPath
+  (totalPosts, labelledPosts) <- liftIO $ withConnection postsSql $ \sql -> do
+    (,)
+      <$> getTotalRows sql
+      <*> getTotalNumberLabelled sql
+  pure $ doctypehtml_ $ do
+    headHtml (Just "Contributing") False
+    body_ $ main_ $ do
+      h1_ "Contribute"
+      navigation [Home, Privacy]
+      p_ $ do
+        "Machine learning algorithms, such as the one ApriBot uses, need to be trained on "
+        i_ "labelled data"
+        ": that is, posts which have been manually classified (by experts—yes, that's you!) as being either Aprimon-related or not. "
+        "Right now, out of a total of "
+        toHtml (show totalPosts)
+        " posts, "
+        toHtml (show labelledPosts)
+        " have been labelled; 7709 of these were used to train ApriBot's current algorithm. "
+        "If you have a few minutes to spare, please consider helping me out by increasing this number!"
+      div_ [id_ "login-link-container"] $ do
+        a_ [href_ "/login", id_ "login-link"] "Log in with Reddit"
+      p_ $ do
+        b_ "ApriBot uses cookies only to log you in and to keep you logged in. "
+        b_ "By logging in, it is assumed that you consent to this. "
+        "See the "
+        a_ [href_ "/privacy"] "privacy page"
+        " for more information."
 
-contributingLoggedInHtml ::
-  Text ->
-  Int ->
-  Int ->
-  Int ->
-  Maybe (Text, Text, Text, Text, Text, Text, Text) ->
-  Html ()
-contributingLoggedInHtml username totalPosts labelledPosts labelledPostsByUser nextPost = do
-  headHtml (Just "Contributing") True
-  body_ $ main_ $ do
-    h1_ "Contribute"
-    p_ $ i_ $ do
-      "("
-      a_ [href_ "/"] "back to home page"
-      " — "
-      a_ [href_ "/privacy"] "privacy"
-      " — "
-      a_ [href_ "/your_votes"] "view your votes"
-      " — "
-      a_ [href_ "/logout"] "logout"
-      ")"
-    p_ $ b_ $ do
-      "You are now logged in as: /u/"
-      toHtml username
-    p_ $ do
-      "Right now, out of a total of "
-      toHtml (show totalPosts)
-      " posts, "
-      toHtml (show labelledPosts)
-      " have been labelled. "
-      if labelledPostsByUser > 0
-        then do
-          toHtml $ show labelledPostsByUser
-          " of these were by you. Thank you so much! <3"
-        else ""
-      case nextPost of
-        -- This is very optimistic...
-        Nothing -> do
-          hr_ []
-          p_ "There are no more unlabelled posts. Please check back again tomorrow!"
-        Just (postId, postUrl, postTitle, postBody, postSubmitter, postTime, postFlair) -> do
-          div_ [class_ "form-container"] $ do
-            form_ [class_ "aprimon-question", action_ "/contribute", method_ "post"] $ do
-              span_ $ b_ "Is the post below offering, or looking for, non-shiny breedable Aprimon?"
-              input_ [type_ "hidden", name_ "id", value_ postId]
-              input_ [type_ "hidden", name_ "username", value_ username]
-              div_ [id_ "button-container"] $ do
-                button_ [type_ "submit", name_ "vote", value_ "1", disabled_ ""] "✅ Yes"
-                button_ [type_ "submit", name_ "vote", value_ "0", disabled_ ""] "❌ No"
-                button_ [type_ "submit", name_ "vote", value_ "2", disabled_ ""] "⏭️ Skip"
-          div_ $ do
-            span_ [class_ "title"] $ toHtmlRaw $ sanitizeBalance postTitle
-            span_ [class_ "boxed-flair"] $ toHtml postFlair
-          ul_ $ do
-            li_ $ toHtml (printf "Submitted by /u/%s at %s UTC" postSubmitter postTime :: String)
-            li_ $ do
-              a_ [href_ postUrl] "Link to original Reddit post"
-          if T.null (T.strip postBody)
-            then p_ "<empty post body>"
-            else
-              div_ [class_ "post-body"] $
-                toHtmlRaw $
-                  commonmarkToHtml [optSmart] [extTable, extStrikethrough] postBody
+contributingLoggedInHtml' :: Text -> App IO (Html ())
+contributingLoggedInHtml' username = do
+  postsSql <- asks cfgPostsDbPath
+  ( totalPosts,
+    labelledPosts,
+    labelledPostsByUser,
+    nextPost
+    ) <- liftIO $ withConnection postsSql $ \sql -> do
+    (,,,)
+      <$> getTotalRows sql
+      <*> getTotalNumberLabelled sql
+      <*> getNumberLabelledBy username sql
+      <*> getNextUnlabelledPost sql
 
-yourVotesHtml :: Int -> Text -> [(Text, Text, Text, Text, Int)] -> Html ()
-yourVotesHtml totalLabelledByUser username votes = do
+  pure $ doctypehtml_ $ do
+    headHtml (Just "Contributing") True
+    body_ $ main_ $ do
+      h1_ "Contribute"
+      navigation [Home, YourVotes, Privacy, Logout]
+      p_ $ b_ $ do
+        "You are now logged in as: /u/"
+        toHtml username
+      p_ $ do
+        "Right now, out of a total of "
+        toHtml (show totalPosts)
+        " posts, "
+        toHtml (show labelledPosts)
+        " have been labelled. "
+        if labelledPostsByUser > 0
+          then do
+            toHtml $ show labelledPostsByUser
+            " of these were by you. Thank you so much! <3"
+          else ""
+        case nextPost of
+          -- This is very optimistic...
+          Nothing -> do
+            hr_ []
+            p_ "There are no more unlabelled posts. Please check back again tomorrow!"
+          Just (postId, postUrl, postTitle, postBody, postSubmitter, postTime, postFlair) -> do
+            div_ [class_ "form-container"] $ do
+              form_ [class_ "aprimon-question", action_ "/contribute", method_ "post"] $ do
+                span_ $ b_ "Is the post below offering, or looking for, non-shiny breedable Aprimon?"
+                input_ [type_ "hidden", name_ "id", value_ postId]
+                input_ [type_ "hidden", name_ "username", value_ username]
+                div_ [id_ "button-container"] $ do
+                  button_ [type_ "submit", name_ "vote", value_ "1", disabled_ ""] "✅ Yes"
+                  button_ [type_ "submit", name_ "vote", value_ "0", disabled_ ""] "❌ No"
+                  button_ [type_ "submit", name_ "vote", value_ "2", disabled_ ""] "⏭️ Skip"
+            div_ $ do
+              span_ [class_ "title"] $ toHtmlRaw $ sanitizeBalance postTitle
+              span_ [class_ "boxed-flair"] $ toHtml postFlair
+            ul_ $ do
+              li_ $ toHtml (printf "Submitted by /u/%s at %s UTC" postSubmitter postTime :: String)
+              li_ $ do
+                a_ [href_ postUrl] "Link to original Reddit post"
+            if T.null (T.strip postBody)
+              then p_ "<empty post body>"
+              else
+                div_ [class_ "post-body"] $
+                  toHtmlRaw $
+                    commonmarkToHtml [optSmart] [extTable, extStrikethrough] postBody
+
+yourVotesHtml' :: Text -> App IO (Html ())
+yourVotesHtml' username = do
+  postsSql <- asks cfgPostsDbPath
+  (votes, totalLabelledByUser) <- liftIO $ withConnection postsSql $ \sql ->
+    (,)
+      <$> getLastNVotesBy 100 username sql
+      <*> getNumberLabelledBy username sql
   let makeTableRow :: (Text, Text, Text, Text, Int) -> Html ()
       makeTableRow (postId, postTitle, postUrl, postSubmitter, vote) =
         tr_ $ do
@@ -370,109 +384,95 @@ yourVotesHtml totalLabelledByUser username votes = do
             1 -> "Yes"
             0 -> "No"
             _ -> error "Vote that wasn't 0 or 1 found: this should not happen!"
-  headHtml (Just "Your votes") False
-  body_ $ main_ $ do
-    h1_ "Your votes"
-    p_ $ i_ $ do
-      "("
-      a_ [href_ "/contribute"] "back to contributing page"
-      " — "
-      a_ [href_ "/privacy"] "privacy"
-      " — "
-      a_ [href_ "/logout"] "logout"
-      ")"
-    p_ $ b_ $ do
-      "You are now logged in as: /u/"
-      toHtml username
-    case votes of
-      [] -> p_ "You have not labelled any posts yet."
-      _ -> do
-        p_ $ do
-          "In total, you have labelled "
-          toHtml (show totalLabelledByUser)
-          " posts. Here are "
-          if totalLabelledByUser > length votes
-            then do
-              "the last "
-              toHtml (show $ length votes)
-            else "all the"
-          " posts you have labelled (most recent on top). Thank you so much for your help!"
-        p_ $ do
-          "If you find you need to change or delete any of your votes, please get in touch with me via "
-          a_ [href_ "https://reddit.com/u/is_a_togekiss"] "Reddit"
-          "."
-        table_ $ do
-          thead_ $ do
-            tr_ $ do
-              th_ "Post ID"
-              th_ "Post title"
-              th_ "Submitter"
-              th_ "Your vote"
-          tbody_ $ do
-            mapM_ makeTableRow votes
 
--- | Thread for the web server
-web :: MVar () -> IO ()
-web stdoutLock = do
-  clientId <- getEnvAsText "REDDIT_FE_ID"
-  clientSecret <- getEnvAsText "REDDIT_FE_SECRET"
-  staticDir <- getDataFileName "static"
-  atomically stdoutLock $ printf "Launching web server on port %d...\n" (port config)
+  pure $ do
+    headHtml (Just "Your votes") False
+    body_ $ main_ $ do
+      h1_ "Your votes"
+      navigation [Home, Contribute, Privacy, Logout]
+      p_ $ b_ $ do
+        "You are now logged in as: /u/"
+        toHtml username
+      case votes of
+        [] -> p_ "You have not labelled any posts yet."
+        _ -> do
+          p_ $ do
+            "In total, you have labelled "
+            toHtml (show totalLabelledByUser)
+            " posts. Here are "
+            if totalLabelledByUser > length votes
+              then do
+                "the last "
+                toHtml (show $ length votes)
+              else "all the"
+            " posts you have labelled (most recent on top). Thank you so much for your help!"
+          p_ $ do
+            "If you find you need to change or delete any of your votes, please get in touch with me via "
+            a_ [href_ "https://reddit.com/u/is_a_togekiss"] "Reddit"
+            "."
+          table_ $ do
+            thead_ $ do
+              tr_ $ do
+                mapM_ th_ ["Post ID", "Post title", "Submitter", "Your vote"]
+            tbody_ $ do
+              mapM_ makeTableRow votes
 
-  S.scotty (port config) $ do
-    S.get "/" $ do
-      liftIO mainHtml >>= S.html . renderText
+-- | Serve static file
+static :: FilePath -> TL.Text -> ST.ActionT TL.Text (App IO) ()
+static path mimeType = do
+  staticDir <- asks cfgStaticDir
+  ST.setHeader "Content-Type" mimeType
+  ST.file (staticDir <> "/" <> path)
 
-    S.get "/static/styles.css" $ do
-      S.setHeader "Content-Type" "text/css"
-      S.file (staticDir <> "/" <> "styles.css")
+-- * The web app
 
-    S.get "/static/site.webmanifest" $ do
-      S.setHeader "Content-Type" "application/manifest+json"
-      S.file (staticDir <> "/" <> "site.webmanifest")
+web :: App IO ()
+web = do
+  cfg <- ask
+  atomically $ printf "Launching web server on port %d...\n" (cfgPort cfg)
 
-    S.get "/static/favicon.ico" $ do
-      S.setHeader "Content-Type" "image/x-icon"
-      S.file (staticDir <> "/" <> "favicon.ico")
+  ST.scottyT (cfgPort cfg) (runAppWith cfg) $ do
+    let serve = ST.html . renderText
+    let serve' html' = do
+          html <- liftIO $ runAppWith cfg html'
+          serve html
 
-    S.get "/static/favicon-16x16.png" $ do
-      S.setHeader "Content-Type" "image/x-png"
-      S.file (staticDir <> "/" <> "favicon-16x16.png")
+    ST.get "/static/styles.css" $ do
+      static "styles.css" "text/css"
+    ST.get "/static/site.webmanifest" $ do
+      static "site.webmanifest" "application/manifest+json"
+    ST.get "/static/favicon.ico" $ do
+      static "favicon.ico" "image/x-icon"
+    ST.get "/static/favicon-16x16.png" $ do
+      static "favicon-16x16.png" "image/x-png"
+    ST.get "/static/favicon-32x32.png" $ do
+      static "favicon-32x32.png" "image/x-png"
+    ST.get "/static/apple-touch-icon.png" $ do
+      static "apple-touch-icon.png" "image/x-png"
+    ST.get "/static/android-chrome-192x192.png" $ do
+      static "android-chrome-192x192.png" "image/x-png"
+    ST.get "/static/android-chrome-512x512.png" $ do
+      static "android-chrome-512x512.png" "image/x-png"
+    ST.get "/static/enableButton.js" $ do
+      static "enableButton.js" "text/javascript"
 
-    S.get "/static/favicon-32x32.png" $ do
-      S.setHeader "Content-Type" "image/x-png"
-      S.file (staticDir <> "/" <> "favicon-32x32.png")
+    ST.get "/" $ do
+      lift mainHtml >>= serve
 
-    S.get "/static/apple-touch-icon.png" $ do
-      S.setHeader "Content-Type" "image/x-png"
-      S.file (staticDir <> "/" <> "apple-touch-icon.png")
+    ST.get "/authorised" $ do
+      makeNewRedditEnv
+      ST.redirect "/contribute"
 
-    S.get "/static/android-chrome-192x192.png" $ do
-      S.setHeader "Content-Type" "image/x-png"
-      S.file (staticDir <> "/" <> "android-chrome-192x192.png")
+    ST.get "/auth_error" $ do
+      serve authErrorHtml
 
-    S.get "/static/android-chrome-512x512.png" $ do
-      S.setHeader "Content-Type" "image/x-png"
-      S.file (staticDir <> "/" <> "android-chrome-512x512.png")
+    ST.get "/contrib_error" $ do
+      serve contribErrorHtml
 
-    S.get "/static/enableButton.js" $ do
-      S.setHeader "Content-Type" "text/javascript"
-      S.file (staticDir <> "/" <> "enableButton.js")
-
-    S.get "/authorised" $ do
-      makeNewRedditEnv clientId clientSecret (redirectUri config)
-      S.redirect "/contribute"
-
-    S.get "/auth_error" $ do
-      S.html $ renderText $ doctypehtml_ authErrorHtml
-
-    S.get "/contrib_error" $ do
-      S.html $ renderText $ doctypehtml_ contribErrorHtml
-
-    S.get "/login" $ do
+    ST.get "/login" $ do
       maybeEnv <- retrieveRedditEnv
       case maybeEnv of
-        Just _ -> S.redirect "/contribute"
+        Just _ -> ST.redirect "/contribute"
         Nothing -> do
           -- Generate a random state for the user, and store it as a cookie
           state <- liftIO $ randomText 40
@@ -486,98 +486,65 @@ web stdoutLock = do
                 C.setCookieMaxAge = Just (secondsToDiffTime 600)
               }
           -- Redirect to Reddit's auth page
-          S.redirect $
+          clientId <- asks cfgRedditFrontendId
+          redirectUri <- asks cfgRedirectUri
+          ST.redirect $
             fromStrict $
               mkRedditAuthURL
                 False
                 AuthUrlParams
                   { authUrlClientID = clientId,
                     authUrlState = state,
-                    authUrlRedirectUri = redirectUri config,
+                    authUrlRedirectUri = redirectUri,
                     authUrlDuration = Temporary,
                     authUrlScopes = Set.singleton ScopeIdentity
                   }
 
-    S.get "/logout" $ do
-      -- Remove token from database
+    ST.get "/logout" $ do
       maybeCookie <- SC.getCookie tokenCookieName
       case maybeCookie of
-        Nothing -> S.redirect "/"
-        Just _ -> do
-          cleanup
-          S.html $ renderText $ doctypehtml_ logoutHtml
+        Nothing -> ST.redirect "/"
+        Just _ -> cleanup >> serve logoutHtml
 
-    S.post "/contribute" $ do
-      mPostId :: Maybe Text <- (Just <$> S.param "id") `S.rescue` const (pure Nothing)
-      mVoter :: Maybe Text <- (Just <$> S.param "username") `S.rescue` const (pure Nothing)
-      mVote :: Maybe Int <- (Just <$> S.param "vote") `S.rescue` const (pure Nothing)
+    ST.post "/contribute" $ do
+      postsSql <- asks cfgPostsDbPath
+      mPostId :: Maybe Text <- (Just <$> ST.param "id") `ST.rescue` const (pure Nothing)
+      mVoter :: Maybe Text <- (Just <$> ST.param "username") `ST.rescue` const (pure Nothing)
+      mVote :: Maybe Int <- (Just <$> ST.param "vote") `ST.rescue` const (pure Nothing)
       case (mPostId, mVoter, mVote) of
         (Just postId, Just voter, Just vote) ->
           if vote /= 0 && vote /= 1
-            then S.redirect "/contribute"
+            then ST.redirect "/contribute"
             else do
-              sqlFileName <- getSqlFileName
-              liftIO $ withConnection sqlFileName $ addVote postId voter vote
-              S.redirect "/contribute"
-        _ -> S.redirect "/contrib_error"
+              liftIO $ withConnection postsSql $ addVote postId voter vote
+              ST.redirect "/contribute"
+        _ -> ST.redirect "/contrib_error"
 
-    S.get "/contribute" $ do
+    ST.get "/contribute" $ do
       maybeEnv <- retrieveRedditEnv
       case maybeEnv of
-        -- User is not logged in
-        Nothing -> do
-          sqlFileName <- getSqlFileName
-          (totalPosts, labelledPosts) <- liftIO $ withConnection sqlFileName $ \sql -> do
-            (,)
-              <$> getTotalRows sql
-              <*> getTotalNumberLabelled sql
-          S.html $ renderText $ doctypehtml_ $ do
-            contributingLoggedOutHtml totalPosts labelledPosts
-        -- User is logged in
+        Nothing -> serve' contributingLoggedOutHtml'
         Just env -> do
           usernameEither <- liftIO $ try $ runRedditT' env (accountUsername <$> myAccount)
           case usernameEither of
             Left e -> do
               cleanup
-              S.html $ renderText $ errorHtml e
+              serve (errorHtml e)
             Right username -> do
-              -- Get data from database
-              sqlFileName <- getSqlFileName
-              (totalPosts, labelledPosts, labelledPostsByUser, nextPost) <- liftIO $ withConnection sqlFileName $ \sql ->
-                do
-                  (,,,)
-                  <$> getTotalRows sql
-                  <*> getTotalNumberLabelled sql
-                  <*> getNumberLabelledBy username sql
-                  <*> getNextUnlabelledPost sql
-              -- Serve HTML
-              S.html $ renderText $ doctypehtml_ $ do
-                contributingLoggedInHtml username totalPosts labelledPosts labelledPostsByUser nextPost
+              serve' (contributingLoggedInHtml' username)
 
-    S.get "/privacy" $ do
-      S.html $ renderText $ doctypehtml_ privacyHtml
+    ST.get "/privacy" $ do
+      serve privacyHtml
 
-    S.get "/your_votes" $ do
+    ST.get "/your_votes" $ do
       maybeEnv <- retrieveRedditEnv
       case maybeEnv of
-        -- User is not logged in
-        Nothing -> do
-          S.redirect "/contribute"
-
-        -- User is logged in
+        Nothing -> ST.redirect "/contribute"
         Just env -> do
           usernameEither <- liftIO $ try $ runRedditT' env (accountUsername <$> myAccount)
           case usernameEither of
             Left e -> do
               cleanup
-              S.html $ renderText $ errorHtml e
+              serve (errorHtml e)
             Right username -> do
-              -- Get data from database
-              sqlFileName <- getSqlFileName
-              (votes, nLabelledByUser) <- liftIO $ withConnection sqlFileName $ \sql ->
-                (,)
-                  <$> getLastNVotesBy 100 username sql
-                  <*> getNumberLabelledBy username sql
-              -- Serve HTML
-              S.html $ renderText $ doctypehtml_ $ do
-                yourVotesHtml nLabelledByUser username votes
+              serve' (yourVotesHtml' username)

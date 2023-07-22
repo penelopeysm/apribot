@@ -49,9 +49,6 @@ module Database
   )
 where
 
-import Config
-import Control.Monad (forM_)
-import Control.Monad.IO.Class (liftIO)
 import Data.Maybe (fromJust, fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -59,11 +56,9 @@ import Data.Text.Encoding (decodeUtf8, encodeUtf8)
 import Data.Time.Format
 import Data.Time.Format.ISO8601
 import Database.SQLite.Simple
-import Paths_apribot (getDataFileName)
 import Reddit
 import Reddit.Auth (Token (..), parseScopes, showScopes)
 import Text.Printf (printf)
-import Utils
 
 -- posts.db
 
@@ -154,53 +149,7 @@ getLastNVotesBy count username conn =
     "SELECT votes.id, posts.title, posts.url, posts.submitter, votes.vote FROM posts INNER JOIN votes ON posts.id=votes.id WHERE votes.username = :username ORDER BY votes.n DESC LIMIT :count;"
     [":username" := username, ":count" := count]
 
--- | Set up the database from scratch. Do not use this unless you want to start
--- all over again...!
-_populateDB :: IO ()
-_populateDB = do
-  sql <- getDataFileName (dbFileName config) >>= open
-  execute_ sql "DROP TABLE posts"
-  execute_
-    sql
-    "CREATE TABLE IF NOT EXISTS posts\
-    \ (id TEXT NOT NULL PRIMARY KEY,\
-    \ url TEXT NOT NULL,\
-    \ title TEXT NOT NULL,\
-    \ body TEXT NOT NULL, \
-    \ submitter TEXT NOT NULL,\
-    \ time TEXT NOT NULL,\
-    \ flair TEXT NOT NULL, \
-    \ hit INTEGER,\
-    \ truth INTEGER);"
-  ownerUsername <- getEnvAsText "REDDIT_USERNAME"
-  ownerPassword <- getEnvAsText "REDDIT_PASSWORD"
-  ownerClientId <- getEnvAsText "REDDIT_FE_ID"
-  ownerClientSecret <- getEnvAsText "REDDIT_FE_SECRET"
-  let creds = OwnerCredentials {..}
-  env <- authenticate creds (userAgent config)
-
-  runRedditT' env $ do
-    last1000Posts <- subredditPosts 1000 "pokemontrades" New
-    forM_ last1000Posts $ \post -> liftIO $ do
-      executeNamed
-        sql
-        "INSERT INTO posts (id, url, title, body, submitter, time, flair) \
-        \ VALUES (:id, :url, :title, :body, :submitter, :time, :flair)"
-        [ ":id" := unPostID (postId post),
-          ":url" := postUrl post,
-          ":title" := postTitle post,
-          ":body" := postBody post,
-          ":submitter" := postAuthor post,
-          ":time" := formatTime defaultTimeLocale "%F %T" (postCreatedTime post),
-          ":flair" := fromMaybe "" (postFlairText post)
-        ]
-
-  close sql
-
 -- tokens.db
-
-getTokenDbConn :: IO Connection
-getTokenDbConn = getDataFileName (tokenDbFileName config) >>= open
 
 serialiseToken :: Token -> (Text, Text, Text, Text)
 serialiseToken tkn =
@@ -220,10 +169,9 @@ deserialiseToken (token, tokenType, expiresAt, scopes) =
       tokenRefreshToken = Nothing
     }
 
-addToken :: Text -> Token -> IO ()
-addToken identifier tkn = do
+addToken :: Text -> Token -> Connection -> IO ()
+addToken identifier tkn conn = do
   let (token, tokenType, expiresAt, scopes) = serialiseToken tkn
-  conn <- getTokenDbConn
   executeNamed
     conn
     "INSERT INTO tokens (id, token, token_type, expires_at, scopes) VALUES (:id, :token, :token_type, :expires_at, :scopes) ON CONFLICT(id) DO UPDATE SET token = :token, token_type = :token_type, expires_at = :expires_at, scopes = :scopes WHERE id = :id;"
@@ -233,23 +181,18 @@ addToken identifier tkn = do
       ":expires_at" := expiresAt,
       ":scopes" := scopes
     ]
-  close conn
 
-getToken :: Text -> IO (Maybe Token)
-getToken identifier = do
-  conn <- getTokenDbConn
+getToken :: Text -> Connection -> IO (Maybe Token)
+getToken identifier conn = do
   tokens <-
     queryNamed
       conn
       "SELECT token, token_type, expires_at, scopes FROM tokens WHERE id = :id"
       [":id" := identifier]
-  close conn
   pure $ case tokens of
     [] -> Nothing
     (t : _) -> Just $ deserialiseToken t
 
-removeToken :: Text -> IO ()
-removeToken identifier = do
-  conn <- getTokenDbConn
+removeToken :: Text -> Connection -> IO ()
+removeToken identifier conn = do
   executeNamed conn "DELETE FROM tokens WHERE id = :id" [":id" := identifier]
-  close conn

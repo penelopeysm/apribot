@@ -1,12 +1,8 @@
 module RedditBot (redditBot) where
 
-import Config
-import Control.Concurrent (MVar, threadDelay)
+import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (concurrently)
-import Control.Concurrent.Chan (Chan)
 import Control.Exception (catch)
-import Control.Monad.IO.Class (liftIO)
-import Control.Monad.Reader (ask)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Database
@@ -17,14 +13,14 @@ import Reddit
 import System.IO (stderr)
 import System.Process (readProcess)
 import Text.Printf (printf)
-import Utils
+import Trans
 
 -- | Determine whether a post is a hit. This uses an external Python script and
 -- a pickled (technically joblib'd) scikit-learn classifier, namely, a stacked
 -- ensemble of logistic regression and XGBoost sub-classifiers.
-isHit :: Post -> IO Bool
-isHit post = do
-  result <- T.pack <$> readProcess (pythonClassifier config) [] (T.unpack $ postTitle post <> " " <> postBody post)
+isHit :: FilePath -> Post -> IO Bool
+isHit classifierPath post = do
+  result <- T.pack <$> readProcess classifierPath [] (T.unpack $ postTitle post <> " " <> postBody post)
   case T.strip result of
     "True" -> pure True
     "False" -> pure False
@@ -33,32 +29,35 @@ isHit post = do
       pure False
 
 -- | Process newly seen posts.
-process :: (MVar (), Chan Post) -> Post -> RedditT (MVar (), Chan Post)
-process (stdoutLock, discordChan) post = do
+process :: Config -> Post -> RedditT Config
+process cfg post = do
+  let lock = cfgLock cfg
+      chan = cfgChan cfg
+      postsSql = cfgPostsDbPath cfg
+      classifierPath = cfgClassifierPath cfg
+
   case T.toLower (postSubreddit post) of
     "pokemontrades" -> do
-      hit <- liftIO $ isHit post
+      hit <- liftIO $ isHit classifierPath post
       if hit
         then do
           liftIO $ do
-            atomically stdoutLock $
+            atomicallyWith lock $
               printf "PTR Hit: %s\n%s\n%s\n" (unPostID (postId post)) (postTitle post) (postUrl post)
-            sqlFileName <- getSqlFileName
-            withConnection sqlFileName $ addToDb post True
-            notifyDiscord discordChan post
+            withConnection postsSql $ addToDb post True
+            notifyDiscord chan post
         else do
           liftIO $ do
-            atomically stdoutLock $
+            atomicallyWith lock $
               printf "PTR Non-hit: %s\n%s\n%s\n" (unPostID (postId post)) (postTitle post) (postUrl post)
-            sqlFileName <- getSqlFileName
-            withConnection sqlFileName $ addToDb post False
+            withConnection postsSql $ addToDb post False
     "bankballexchange" -> do
       liftIO $ do
-        atomically stdoutLock $
+        atomicallyWith lock $
           printf "BBE: %s\n%s\n%s\n" (unPostID (postId post)) (postTitle post) (postUrl post)
-        notifyDiscord discordChan post
+        notifyDiscord chan post
     _ -> pure ()
-  pure (stdoutLock, discordChan)
+  pure cfg
 
 -- | Fetch posts from pokemontrades and BankBallExchange.
 fetchPosts :: RedditT [Post]
@@ -70,22 +69,27 @@ fetchPosts = do
   pure $ ptrPosts <> bbePosts
 
 -- | Thread to stream Reddit posts and process them
-redditBot :: MVar () -> Chan Post -> IO ()
-redditBot stdoutLock discordLock = do
-  atomically stdoutLock $ T.putStrLn "Starting Reddit bot..."
-  ownerUsername <- getEnvAsText "REDDIT_USERNAME"
-  ownerPassword <- getEnvAsText "REDDIT_PASSWORD"
-  ownerClientId <- getEnvAsText "REDDIT_ID"
-  ownerClientSecret <- getEnvAsText "REDDIT_SECRET"
+redditBot :: App IO ()
+redditBot = do
+  atomically $ T.putStrLn "Starting Reddit bot..."
+
+  cfg <- ask
+  ownerUsername <- asks cfgRedditUsername
+  ownerPassword <- asks cfgRedditPassword
+  ownerClientId <- asks cfgRedditId
+  ownerClientSecret <- asks cfgRedditSecret
+  userAgent <- asks cfgUserAgent
+  lock <- asks cfgLock
   let creds = OwnerCredentials {..}
-  env <- authenticate creds (userAgent config)
+
+  redditEnv <- liftIO $ authenticate creds userAgent
   let settings = defaultStreamSettings {streamsDelay = 10, streamsStorageSize = 400}
   let loop = do
         catch
-          (runRedditT' env $ stream settings process (stdoutLock, discordLock) fetchPosts)
+          (runRedditT' redditEnv $ stream settings process cfg fetchPosts)
           ( \(e :: HttpException) -> do
-              atomically stdoutLock $ T.hPutStrLn stderr ("Exception: " <> T.pack (show e))
+              atomicallyWith lock $ T.hPutStrLn stderr ("Exception: " <> T.pack (show e))
               threadDelay 5000000
               loop
           )
-  loop
+  liftIO loop
