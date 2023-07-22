@@ -24,13 +24,13 @@ config =
   Config
     { dbFileName = "/data/posts.db",
       tokenDbFileName = "/data/tokens.db",
-      ptradesChannelId = DiscordId $ Snowflake 1120783589928345661,
-      bbeChannelId = DiscordId $ Snowflake 1120783566889037834,
+      ptradesChannelId = 1120783589928345661,
+      bbeChannelId = 1120783566889037834,
       port = thePort,
       userAgent = "github:penelopeysm/apribot by /u/is_a_togekiss",
       redirectUri = "https://apribot.fly.dev/authorised",
       -- redirectUri = T.pack (printf "http://localhost:%d/authorised" thePort),
       pythonClassifier = "python/predict.py",
       -- right now only me
-      trustedDiscordUsers = [DiscordId $ Snowflake 236863453443260419]
+      trustedDiscordUsers = [236863453443260419]
     }

@@ -118,7 +118,7 @@ notifyLoop discordChan = do
   now <- systemSeconds <$> liftIO getSystemTime
   -- Use discord timestamp format
   void . restCall $
-    DR.CreateMessage (DiscordId $ Snowflake 1132000877415247903) ("ApriBot started at: <t:" <> T.pack (show now) <> ">")
+    DR.CreateMessage 1132000877415247903 ("ApriBot started at: <t:" <> T.pack (show now) <> ">")
   forever $ do
     post <- liftIO $ readChan discordChan
     case T.toLower (postSubreddit post) of
