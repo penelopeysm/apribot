@@ -11,7 +11,8 @@ data Config = Config
     port :: Int,
     userAgent :: Text,
     redirectUri :: Text,
-    pythonClassifier :: FilePath
+    pythonClassifier :: FilePath,
+    trustedDiscordUsers :: [UserId]
   }
 
 thePort :: Int
@@ -29,5 +30,7 @@ config =
       userAgent = "github:penelopeysm/apribot by /u/is_a_togekiss",
       redirectUri = "https://apribot.fly.dev/authorised",
       -- redirectUri = T.pack (printf "http://localhost:%d/authorised" thePort),
-      pythonClassifier = "python/predict.py"
+      pythonClassifier = "python/predict.py",
+      -- right now only me
+      trustedDiscordUsers = [DiscordId $ Snowflake 236863453443260419]
     }

@@ -3,7 +3,7 @@ module DiscordBot (notifyDiscord, discordBot) where
 import Config
 import Control.Concurrent (MVar, forkIO)
 import Control.Concurrent.Chan (Chan, readChan, writeChan)
-import Control.Monad (forever, void)
+import Control.Monad (forever, void, when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Reader (ask, runReaderT)
 import qualified Data.Text as T
@@ -44,18 +44,41 @@ notifyDiscord discordChan post = do
 --    future.
 eventHandler :: MVar () -> Chan Post -> Event -> DiscordHandler ()
 eventHandler stdoutLock discordChan e = do
+  -- Print the event
+  liftIO $ atomically stdoutLock $ print e >> putStrLn "" >> putStrLn ""
   case e of
+    -- Begin notification loop
     Ready {} -> do
       env <- ask
       liftIO $ void $ forkIO $ runReaderT (notifyLoop discordChan) env
-    _ -> liftIO $ atomically stdoutLock $ print e >> putStrLn "" >> putStrLn ""
+    -- Delete a message when a trusted user reacts with :thumbsdown: to it, or
+    -- when there are more than 3 thumbs down
+    MessageReactionAdd (ReactionInfo userId _ channelId messageId emoji) -> do
+      let thumbsDown = "\x1f44e"
+      let thumbsDownThreshold = 3
+      thumbsDownReacts <- restCall $ DR.GetReactions (channelId, messageId) thumbsDown (thumbsDownThreshold, DR.LatestReaction)
+      let nThumbsDown = case thumbsDownReacts of
+            Right rs -> length rs
+            Left _ -> 0
+      let toDelete =
+            (nThumbsDown >= 3)
+              || ( (userId `elem` trustedDiscordUsers config)
+                     && (emojiName emoji == thumbsDown)
+                     && (channelId `elem` [ptradesChannelId config, bbeChannelId config])
+                 )
+      when toDelete $ void $ restCall $ DR.DeleteMessage (channelId, messageId)
+    -- Ignore other events
+    _ -> pure ()
 
 cleanRedditMarkdown :: T.Text -> T.Text
 cleanRedditMarkdown = T.replace "#" "\\#" . T.replace "&#x200B;" "" . T.replace "&amp;" "&" . T.replace "&lt;" "<" . T.replace "&gt;" ">"
 
 summarisePostBody :: Post -> T.Text
 summarisePostBody post =
-  let body = cleanRedditMarkdown (postBody post)
+  let body = case postCrosspostParents post of
+        Nothing -> cleanRedditMarkdown (postBody post)
+        Just [] -> cleanRedditMarkdown (postBody post) -- Shouldn't happen
+        Just (xpost : _) -> cleanRedditMarkdown (postBody xpost)
       maxWords = 30
       maxChars = 4096 -- Discord API limit
       ws = T.words body
@@ -79,8 +102,7 @@ makeMessageDetails post =
                   { createEmbedUrl = postUrl post,
                     createEmbedTitle = truncatedTitle,
                     createEmbedDescription = summarisePostBody post,
-                    createEmbedAuthorName = "/u/" <> postAuthor post,
-                    createEmbedAuthorUrl = "https://reddit.com/u/" <> postAuthor post,
+                    createEmbedFooterText = "by /u/" <> postAuthor post,
                     createEmbedColor = Just DiscordColorLuminousVividPink,
                     createEmbedTimestamp = Just (postCreatedTime post)
                   }
@@ -95,7 +117,7 @@ notifyLoop discordChan = do
   -- Notify that the bot has started, in my private channel.
   now <- systemSeconds <$> liftIO getSystemTime
   -- Use discord timestamp format
-  void . restCall $ 
+  void . restCall $
     DR.CreateMessage (DiscordId $ Snowflake 1132000877415247903) ("ApriBot started at: <t:" <> T.pack (show now) <> ">")
   forever $ do
     post <- liftIO $ readChan discordChan
