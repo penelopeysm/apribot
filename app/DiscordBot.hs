@@ -73,12 +73,17 @@ eventHandler stdoutLock discordChan e = do
 cleanRedditMarkdown :: T.Text -> T.Text
 cleanRedditMarkdown = T.replace "#" "\\#" . T.replace "&#x200B;" "" . T.replace "&amp;" "&" . T.replace "&lt;" "<" . T.replace "&gt;" ">"
 
+-- | Get the first element of a list, if it exists
+mbHead :: Maybe [a] -> Maybe a
+mbHead Nothing = Nothing
+mbHead (Just []) = Nothing
+mbHead (Just (x : _)) = Just x
+
 summarisePostBody :: Post -> T.Text
 summarisePostBody post =
-  let body = case postCrosspostParents post of
+  let body = case mbHead (postCrosspostParents post) of
         Nothing -> cleanRedditMarkdown (postBody post)
-        Just [] -> cleanRedditMarkdown (postBody post) -- Shouldn't happen
-        Just (xpost : _) -> cleanRedditMarkdown (postBody xpost)
+        Just xpost -> cleanRedditMarkdown (postBody xpost)
       maxWords = 30
       maxChars = 4096 -- Discord API limit
       ws = T.words body
@@ -92,7 +97,10 @@ summarisePostBody post =
 
 makeMessageDetails :: Post -> DR.MessageDetailedOpts
 makeMessageDetails post =
-  let maxTitleLength = 256 -- Discord API limit
+  let footerText = case mbHead (postCrosspostParents post) of
+        Nothing -> "by /u/" <> postAuthor post
+        Just xpost -> "xposted from /r/" <> postSubreddit xpost <> "by /u/" <> postAuthor xpost
+      maxTitleLength = 256 -- Discord API limit
       title = cleanRedditMarkdown (postTitle post)
       truncatedTitle = if T.length title > maxTitleLength then T.take (maxTitleLength - 3) title <> "..." else title
    in def
@@ -102,7 +110,7 @@ makeMessageDetails post =
                   { createEmbedUrl = postUrl post,
                     createEmbedTitle = truncatedTitle,
                     createEmbedDescription = summarisePostBody post,
-                    createEmbedFooterText = "by /u/" <> postAuthor post,
+                    createEmbedFooterText = footerText,
                     createEmbedColor = Just DiscordColorLuminousVividPink,
                     createEmbedTimestamp = Just (postCreatedTime post)
                   }
