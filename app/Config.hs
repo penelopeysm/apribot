@@ -69,8 +69,8 @@ getConfig = do
   cfgTokensDbPath <- getDataFileName "data/tokens.db"
   cfgClassifierPath <- getDataFileName "python/predict.py"
 
-  let cfgPtrChannelId = 1120783589928345661
-      cfgBbeChannelId = 1120783566889037834
+  let cfgPtrChannelId = if onFly then 1120783589928345661 else 1132714928810238062
+      cfgBbeChannelId = if onFly then 1120783566889037834 else 1132714951014875246
       cfgPort = 8080
       cfgUserAgent = "github:penelopeysm/apribot by /u/is_a_togekiss"
       cfgRedirectUri =
