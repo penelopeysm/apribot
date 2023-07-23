@@ -14,7 +14,6 @@ import Data.Time.Clock (secondsToDiffTime)
 import Database
 import Database.SQLite.Simple
 import Lucid
-import Network.Wai.Handler.Warp (Settings, defaultSettings, setPort)
 import Reddit
 import Reddit.Auth (Token (..))
 import Text.HTML.SanitizeXSS (sanitizeBalance)
@@ -23,7 +22,6 @@ import Trans
 import Utils
 import qualified Web.Cookie as C
 import qualified Web.Scotty.Cookie as SC
-import Web.Scotty.Trans ()
 import qualified Web.Scotty.Trans as ST
 
 hashedStateCookieName :: Text
@@ -429,14 +427,8 @@ web :: App IO ()
 web = do
   cfg <- ask
   atomically $ printf "Launching web server on port %d...\n" (cfgPort cfg)
-  let opts :: ST.Options
-      opts =
-        ST.Options
-          { ST.verbose = 0,
-            ST.settings = setPort (cfgPort cfg) defaultSettings
-          }
 
-  ST.scottyOptsT opts (runAppWith cfg) $ do
+  ST.scottyT (cfgPort cfg) (runAppWith cfg) $ do
     -- everything inside here is ~ ScottyT TL.Text (App IO) ()
     let serve = ST.html . renderText
     let serve' html' = do
