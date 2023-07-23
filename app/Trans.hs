@@ -49,7 +49,7 @@ atomicallyWith lock action = do
   liftIO $ withMVar lock $ const action
 
 -- | Run an IO action atomically, using the lock in the config.
-atomically :: IO () -> App IO ()
+atomically :: MonadIO m => IO () -> App m ()
 atomically action = do
   lock <- asks cfgLock
-  atomicallyWith lock action
+  liftIO $ atomicallyWith lock action

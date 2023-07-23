@@ -77,7 +77,7 @@ makeNewRedditEnv = do
                 codeGrantCode = authCode
               }
       env <- liftIO $ authenticate creds (cfgUserAgent cfg)
-      t <- liftIO $ runRedditT' env getTokenFromEnv
+      t <- liftIO $ getTokenFromEnv env
       -- Generate a random session ID for the user and store it in a cookie
       sessionId <- liftIO $ randomText 60
       let sessionCookie = SC.makeSimpleCookie tokenCookieName sessionId
@@ -527,7 +527,7 @@ web = do
       case maybeEnv of
         Nothing -> serve' contributingLoggedOutHtml'
         Just env -> do
-          usernameEither <- liftIO $ try $ runRedditT' env (accountUsername <$> myAccount)
+          usernameEither <- liftIO $ try $ runRedditT env (accountUsername <$> myAccount)
           case usernameEither of
             Left e -> do
               cleanup
@@ -543,7 +543,7 @@ web = do
       case maybeEnv of
         Nothing -> ST.redirect "/contribute"
         Just env -> do
-          usernameEither <- liftIO $ try $ runRedditT' env (accountUsername <$> myAccount)
+          usernameEither <- liftIO $ try $ runRedditT env (accountUsername <$> myAccount)
           case usernameEither of
             Left e -> do
               cleanup
