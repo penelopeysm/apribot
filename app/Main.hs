@@ -1,6 +1,7 @@
 module Main where
 
-import Control.Concurrent.Async (mapConcurrently_)
+import Control.Concurrent (threadDelay)
+import Control.Concurrent.Async (mapConcurrently_, race_)
 import DiscordBot (discordBot)
 import RedditBot (redditBot)
 import System.IO (BufferMode (NoBuffering), hSetBuffering, stdout)
@@ -15,6 +16,8 @@ main = runApp $ App $ do
   -- buffering, the output can't be seen on Fly.io logs.
   liftIO $ hSetBuffering stdout NoBuffering
   liftIO $
-    mapConcurrently_
-      (runAppWith cfg) 
-      [web, redditBot, discordBot]
+    race_
+      (threadDelay 300000000)
+      (mapConcurrently_
+        (runAppWith cfg) 
+        [web, redditBot, discordBot])
