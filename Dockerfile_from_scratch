@@ -2,9 +2,7 @@
 # we need to run the web app (and manage it over SSH).
 #
 # Usage:
-#   docker build . -f Dockerfile_from_scratch -t penelopeysm/apribot
-#   docker tag penelopeysm/apribot penelopeysm/apribot:<VERSION_NUMBER>
-#   docker push penelopeysm/apribot
+#   docker build . -f Dockerfile_from_scratch -t penelopeysm/apribot && docker push penelopeysm/apribot
 #
 # After this is done, the main Dockerfile will just pull from this pre-built
 # image, meaning that we don't have to re-build the dependencies every time we
@@ -12,26 +10,23 @@
 
 FROM python:3.11.4-bookworm
 
-WORKDIR /
-COPY . .
-RUN git config --global --add safe.directory '*'
-
 # Install sqlite3
-RUN apt-get update
-RUN apt-get install -y sqlite3
+RUN apt-get update && apt-get install -y sqlite3
 
 # Install packages
-RUN python -m pip install --upgrade pip setuptools
-RUN python -m pip install -r python/requirements.txt
+RUN python -m pip install --upgrade pip setuptools && python -m pip install -r python/requirements.txt
 
 # Set up Haskell
 # https://stackoverflow.com/a/71513191
 RUN curl https://downloads.haskell.org/~ghcup/x86_64-linux-ghcup > /usr/bin/ghcup && chmod +x /usr/bin/ghcup
 # discord-haskell doesn't work with GHC 9.6, so we stick to 9.4
-RUN ghcup -v install ghc --isolate /usr/local --force 9.4.5
-RUN ghcup -v install cabal --isolate /usr/local/bin --force 3.6.2.0
+RUN ghcup -v install ghc --isolate /usr/local --force 9.4.5 && ghcup -v install cabal --isolate /usr/local/bin --force 3.6.2.0
 RUN cabal update
 RUN cabal build
+
+WORKDIR /
+COPY . .
+RUN git config --global --add safe.directory '*'
 
 CMD ["/bin/bash"]
 
