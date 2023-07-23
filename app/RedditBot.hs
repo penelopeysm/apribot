@@ -31,7 +31,6 @@ process post = do
   cfg <- lift ask
   let chan = cfgChan cfg
       postsSql = cfgPostsDbPath cfg
-
   case T.toLower (postSubreddit post) of
     "pokemontrades" -> do
       hit <- lift $ isHit post
@@ -57,6 +56,7 @@ process post = do
 fetchPosts :: RedditT (App IO) [Post]
 fetchPosts = do
   env <- ask
+  lift $ atomically $ T.putStrLn "Fetching posts from subreddits..."
   let ptr = runRedditT env $ subredditPosts 50 "pokemontrades" New
       bbe = runRedditT env $ subredditPosts 50 "BankBallExchange" New
   (ptrPosts, bbePosts) <- liftIO $ concurrently ptr bbe
