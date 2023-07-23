@@ -12,6 +12,7 @@ module Trans
     Control.Monad.IO.Class.liftIO,
     Control.Monad.Reader.ask,
     Control.Monad.Reader.asks,
+    Control.Monad.Reader.ReaderT (..),
     Control.Monad.forever,
     Control.Monad.void,
     Control.Monad.when,

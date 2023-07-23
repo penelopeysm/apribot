@@ -1,2 +1,3 @@
 **/dist-newstyle
 **/*.db
+cabal.project.local

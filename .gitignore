@@ -1,3 +1,4 @@
 dist-newstyle
 *.db
 **/__pycache__
+cabal.project.local

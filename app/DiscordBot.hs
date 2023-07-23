@@ -1,8 +1,19 @@
+-- | Discord bot.
+--
+-- Note that we should actually like to implement a transformer stack like
+--
+--      DiscordT (App IO) ()
+--
+-- However, the discord-haskell library doesn't actually provide a DiscordT
+-- transformer, so we do it the other way round, i.e.
+--
+--      App DiscordHandler ()
+--
+-- where DiscordHandler is a synonym for ReaderT DiscordHandle IO.
 module DiscordBot (notifyDiscord, discordBot) where
 
 import Control.Concurrent (forkIO)
 import Control.Concurrent.Chan (Chan, readChan, writeChan)
-import Control.Monad.Reader (runReaderT)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Data.Time.Clock.System (getSystemTime, systemSeconds)
@@ -18,13 +29,12 @@ discordBot = do
   discordToken <- asks cfgDiscordToken
   cfg <- ask
   lock <- asks cfgLock
-
   err <-
     liftIO $
       runDiscord $
         def
           { discordToken = discordToken,
-            discordOnEvent = eventHandler cfg,
+            discordOnEvent = runAppWith cfg . eventHandler,
             discordOnStart = atomicallyWith lock $ putStrLn "Starting Discord bot..."
           }
   atomically $ T.putStrLn err
@@ -33,8 +43,7 @@ discordBot = do
 -- It adds the post to the MVar, which effectively triggers channelLoop to post
 -- a message to Discord.
 notifyDiscord :: Chan Post -> Post -> IO ()
-notifyDiscord discordChan post = do
-  writeChan discordChan post
+notifyDiscord = writeChan
 
 -- | Discord event handler. Right now, this does two things:
 --
@@ -42,18 +51,49 @@ notifyDiscord discordChan post = do
 -- 2. Responds to messages from myself. This will be removed at some point in
 --    time, but the idea is that we might want to respond to other events in the
 --    future.
-eventHandler :: Config -> Event -> DiscordHandler ()
-eventHandler cfg e = do
+eventHandler :: Event -> App DiscordHandler ()
+eventHandler e = do
+  cfg <- ask
   let lock = cfgLock cfg
   -- Print the event
   atomicallyWith lock $ print e >> putStrLn "" >> putStrLn ""
   case e of
     -- Begin notification loop
     Ready {} -> do
-      env <- ask
-      liftIO $ void $ forkIO $ runReaderT (notifyLoop cfg) env
+      hdl <- lift ask
+      liftIO $ void $ forkIO $ (`runReaderT` hdl) $ runAppWith cfg notifyLoop
     -- Ignore other events (for now)
     _ -> pure ()
+
+-- | Loop which waits for a post to be added to the MVar. When one is added (via
+-- the 'notifyDiscord' function), this posts it to the Discord channel.
+notifyLoop :: App DiscordHandler ()
+notifyLoop = do
+  cfg <- ask
+  let restCall_ = lift . void . restCall
+
+  -- Notify that the bot has started, in my private channel.
+  now <- systemSeconds <$> liftIO getSystemTime
+  restCall_ $
+    DR.CreateMessage 1132000877415247903 ("ApriBot started at: <t:" <> T.pack (show now) <> ">")
+
+  let chan = cfgChan cfg
+  forever $ do
+    post <- liftIO $ readChan chan
+    case T.toLower (postSubreddit post) of
+      "pokemontrades" ->
+        restCall_ $
+          DR.CreateMessageDetailed
+            (cfgPtrChannelId cfg)
+            (makeMessageDetails post)
+      "bankballexchange" ->
+        restCall_ $
+          DR.CreateMessageDetailed
+            (cfgBbeChannelId cfg)
+            (makeMessageDetails post)
+      _ -> pure ()
+
+-- * Helper functions
 
 cleanRedditMarkdown :: T.Text -> T.Text
 cleanRedditMarkdown = T.replace "#" "\\#" . T.replace "&#x200B;" "" . T.replace "&amp;" "&" . T.replace "&lt;" "<" . T.replace "&gt;" ">"
@@ -107,28 +147,3 @@ makeMessageDetails post =
               ],
           DR.messageDetailedContent = ""
         }
-
--- | Loop which waits for a post to be added to the MVar. When one is added (via
--- the 'notifyDiscord' function), this posts it to the Discord channel.
-notifyLoop :: Config -> DiscordHandler ()
-notifyLoop cfg = do
-  -- Notify that the bot has started, in my private channel.
-  now <- systemSeconds <$> liftIO getSystemTime
-  void . restCall $
-    DR.CreateMessage 1132000877415247903 ("ApriBot started at: <t:" <> T.pack (show now) <> ">")
-
-  let chan = cfgChan cfg
-  forever $ do
-    post <- liftIO $ readChan chan
-    case T.toLower (postSubreddit post) of
-      "pokemontrades" ->
-        void . restCall $
-          DR.CreateMessageDetailed
-            (cfgPtrChannelId cfg)
-            (makeMessageDetails post)
-      "bankballexchange" ->
-        void . restCall $
-          DR.CreateMessageDetailed
-            (cfgBbeChannelId cfg)
-            (makeMessageDetails post)
-      _ -> pure ()

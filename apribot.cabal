@@ -97,6 +97,7 @@ executable apribot
                       text,
                       time,
                       transformers,
+                      warp,
                       xss-sanitize,
 
     -- Directories containing source files.

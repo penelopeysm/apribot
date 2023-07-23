@@ -14,6 +14,7 @@ import Data.Time.Clock (secondsToDiffTime)
 import Database
 import Database.SQLite.Simple
 import Lucid
+import Network.Wai.Handler.Warp (Settings, defaultSettings, setPort)
 import Reddit
 import Reddit.Auth (Token (..))
 import Text.HTML.SanitizeXSS (sanitizeBalance)
@@ -22,6 +23,7 @@ import Trans
 import Utils
 import qualified Web.Cookie as C
 import qualified Web.Scotty.Cookie as SC
+import Web.Scotty.Trans ()
 import qualified Web.Scotty.Trans as ST
 
 hashedStateCookieName :: Text
@@ -146,18 +148,15 @@ headHtml titleExtra withJS = do
       else mempty
 
 -- | Error HTML
-errorHtml :: SomeException -> Html ()
-errorHtml e = doctypehtml_ $ do
+errorHtml :: Html ()
+errorHtml = doctypehtml_ $ do
   headHtml (Just "Error") False
   body_ $ do
     h1_ "An error occurred :("
     p_ $ do
-      "Please report this to me, either via "
-      a_ [href_ "https://github.com/penelopeysm/apribot"] "GitHub"
-      " or "
-      a_ [href_ "https://reddit.com/u/is_a_togekiss"] "Reddit"
+      "Sorry about that. You can go back to the "
+      a_ [href_ "/"] "home page"
       "."
-    p_ $ code_ $ toHtml $ show e
 
 -- | HTML for the main page
 mainHtml :: App IO (Html ())
@@ -430,12 +429,23 @@ web :: App IO ()
 web = do
   cfg <- ask
   atomically $ printf "Launching web server on port %d...\n" (cfgPort cfg)
+  let opts :: ST.Options
+      opts =
+        ST.Options
+          { ST.verbose = 0,
+            ST.settings = setPort (cfgPort cfg) defaultSettings
+          }
 
-  ST.scottyT (cfgPort cfg) (runAppWith cfg) $ do
+  ST.scottyOptsT opts (runAppWith cfg) $ do
+    -- everything inside here is ~ ScottyT TL.Text (App IO) ()
     let serve = ST.html . renderText
     let serve' html' = do
           html <- liftIO $ runAppWith cfg html'
           serve html
+
+    ST.defaultHandler $ \e -> do
+      lift $ atomically $ printf "Scotty caught exception: <%s>\n" (show e)
+      serve errorHtml
 
     ST.get "/static/styles.css" $ do
       static "styles.css" "text/css"
@@ -529,7 +539,7 @@ web = do
           case usernameEither of
             Left e -> do
               cleanup
-              serve (errorHtml e)
+              ST.raise (TL.pack $ show (e :: SomeException))
             Right username -> do
               serve' (contributingLoggedInHtml' username)
 
@@ -545,6 +555,6 @@ web = do
           case usernameEither of
             Left e -> do
               cleanup
-              serve (errorHtml e)
+              ST.raise (TL.pack $ show (e :: SomeException))
             Right username -> do
               serve' (yourVotesHtml' username)
