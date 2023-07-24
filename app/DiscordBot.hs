@@ -14,7 +14,7 @@ module DiscordBot (notifyDiscord, discordBot) where
 
 import Control.Concurrent (forkIO)
 import Control.Concurrent.Chan (readChan, writeChan)
-import Control.Exception (try, SomeException)
+import Control.Exception (SomeException, try)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
@@ -24,6 +24,7 @@ import qualified Discord.Requests as DR
 import Discord.Types
 import Pokeapi
 import Reddit (Post (..), getPost, runRedditT)
+import System.Random (randomRIO)
 import Trans
 
 -- | Run the Discord bot.
@@ -63,6 +64,15 @@ getHA p = try $ do
         [] -> Nothing
         (n : _) -> Just $ nameName n
 
+randomAbility :: IO Text
+randomAbility = do
+  abId :: Int <- randomRIO (0, 358)
+  abty <- ability (T.pack $ show abId)
+  let englishName = filter (\n -> name (nameLanguage n) == "en") (abilityNames abty)
+  pure $ case englishName of
+    [] -> "You managed to break the bot. Congratulations!"
+    (n : _) -> nameName n
+
 -- | Discord event handler. Right now, this does two things:
 --
 -- 1. Starts the channelLoop when the bot is initialised.
@@ -87,6 +97,7 @@ eventHandler e = do
         let pkmn = T.strip . T.drop 3 $ msg
         atomically $ print pkmn
         ha <- liftIO $ getHA pkmn
+        randomApp <- liftIO randomAbility
         atomically $ print ha
         restCall_ $
           DR.CreateMessageDetailed
@@ -94,7 +105,7 @@ eventHandler e = do
             ( def
                 { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
                   DR.messageDetailedContent = case ha of
-                    Left _ -> "Could not find Pokemon named '" <> pkmn <> "'"
+                    Left _ -> "I don't think " <> pkmn <> " is a Pokemon, but if it was, it would have the hidden ability " <> randomApp <> "!"
                     Right Nothing -> pkmn <> " has no hidden ability"
                     Right (Just x) -> pkmn <> "'s hidden ability is: " <> x
                 }
