@@ -4,3 +4,8 @@ source-repository-package
     type: git
     location: https://github.com/penelopeysm/reddit-oauth2
     tag: 7c67d06ba8eb8c67a074315951914bcb777af626
+
+source-repository-package
+    type: git
+    location: https://github.com/penelopeysm/pokeapi
+    tag: 0490045f85a835c67da1877b745cdaaa58ed5337

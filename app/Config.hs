@@ -1,4 +1,4 @@
-module Config (Config (..), getConfig) where
+module Config (Config (..), getConfig, NotifyEvent (..)) where
 
 import Control.Concurrent.Chan (Chan, newChan)
 import Control.Concurrent.MVar (MVar, newMVar)
@@ -7,8 +7,13 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Discord.Types
 import Paths_apribot (getDataFileName)
-import Reddit (Post)
+import Reddit (Post, ID)
 import System.Environment (getEnv, lookupEnv)
+
+data NotifyEvent
+  = NotifyPost Post
+  | NotifyPostById (ID Post)
+  deriving (Show)
 
 data Config = Config
   { -- | Path to the posts.db SQLite database file.
@@ -46,16 +51,15 @@ data Config = Config
     -- | Lock to prevent multiple threads writing to stdout at once.
     cfgLock :: MVar (),
     -- | Channel to pass posts to Discord.
-    cfgChan :: Chan Post
+    cfgChan :: Chan NotifyEvent,
+    -- | Whether the app is running on Fly.io.
+    cfgOnFly :: Bool
   }
-
-isOnFly :: IO Bool
-isOnFly = isJust <$> lookupEnv "FLY_APP_NAME"
 
 -- | App configuration.
 getConfig :: IO Config
 getConfig = do
-  onFly <- isOnFly
+  cfgOnFly <- isJust <$> lookupEnv "FLY_APP_NAME"
   cfgDiscordToken <- T.pack <$> getEnv "DISCORD_APRIBOT_TOKEN"
   cfgRedditId <- T.pack <$> getEnv "REDDIT_ID"
   cfgRedditSecret <- T.pack <$> getEnv "REDDIT_SECRET"
@@ -69,12 +73,12 @@ getConfig = do
   cfgTokensDbPath <- getDataFileName "data/tokens.db"
   cfgClassifierPath <- getDataFileName "python/predict.py"
 
-  let cfgPtrChannelId = if onFly then 1120783589928345661 else 1132714928810238062
-      cfgBbeChannelId = if onFly then 1120783566889037834 else 1132714951014875246
+  let cfgPtrChannelId = if cfgOnFly then 1120783589928345661 else 1132714928810238062
+      cfgBbeChannelId = if cfgOnFly then 1120783566889037834 else 1132714951014875246
       cfgPort = 8080
       cfgUserAgent = "github:penelopeysm/apribot by /u/is_a_togekiss"
       cfgRedirectUri =
-        if onFly
+        if cfgOnFly
           then "https://apribot.fly.dev/authorised"
           else "http://localhost:8080/authorised"
   cfgLock <- newMVar ()

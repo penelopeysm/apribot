@@ -13,14 +13,17 @@
 module DiscordBot (notifyDiscord, discordBot) where
 
 import Control.Concurrent (forkIO)
-import Control.Concurrent.Chan (Chan, readChan, writeChan)
+import Control.Concurrent.Chan (readChan, writeChan)
+import Control.Exception (try, SomeException)
+import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Data.Time.Clock.System (getSystemTime, systemSeconds)
 import Discord
 import qualified Discord.Requests as DR
 import Discord.Types
-import Reddit (Post (..))
+import Pokeapi
+import Reddit (Post (..), getPost, runRedditT)
 import Trans
 
 -- | Run the Discord bot.
@@ -42,8 +45,23 @@ discordBot = do
 -- | This function is exported to allow the Reddit bot to talk to this module.
 -- It adds the post to the MVar, which effectively triggers channelLoop to post
 -- a message to Discord.
-notifyDiscord :: Chan Post -> Post -> IO ()
-notifyDiscord = writeChan
+notifyDiscord :: NotifyEvent -> App IO ()
+notifyDiscord e = do
+  chan <- asks cfgChan
+  liftIO $ writeChan chan e
+
+-- TODO: return a better type (lol)
+getHA :: Text -> IO (Either SomeException (Maybe Text))
+getHA p = try $ do
+  pkmn <- pokemon p
+  case filter paIsHidden (pokemonAbilities pkmn) of
+    [] -> pure Nothing
+    (x : _) -> do
+      abty <- ability $ name (paAbility x)
+      let englishName = filter (\n -> name (nameLanguage n) == "en") (abilityNames abty)
+      pure $ case englishName of
+        [] -> Nothing
+        (n : _) -> Just $ nameName n
 
 -- | Discord event handler. Right now, this does two things:
 --
@@ -54,14 +72,33 @@ notifyDiscord = writeChan
 eventHandler :: Event -> App DiscordHandler ()
 eventHandler e = do
   cfg <- ask
-  let lock = cfgLock cfg
+  let restCall_ = lift . void . restCall
   -- Print the event
-  atomicallyWith lock $ print e >> putStrLn "" >> putStrLn ""
+  atomically $ print e >> putStrLn "" >> putStrLn ""
   case e of
     -- Begin notification loop
     Ready {} -> do
       hdl <- lift ask
       liftIO $ void $ forkIO $ (`runReaderT` hdl) $ runAppWith cfg notifyLoop
+    -- Respond to HA requests
+    MessageCreate m -> do
+      let msg = messageContent m
+      when ("!ha " `T.isPrefixOf` msg) $ do
+        let pkmn = T.strip . T.drop 3 $ msg
+        atomically $ print pkmn
+        ha <- liftIO $ getHA pkmn
+        atomically $ print ha
+        restCall_ $
+          DR.CreateMessageDetailed
+            (messageChannelId m)
+            ( def
+                { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
+                  DR.messageDetailedContent = case ha of
+                    Left _ -> "Could not find Pokemon named '" <> pkmn <> "'"
+                    Right Nothing -> pkmn <> " has no hidden ability"
+                    Right (Just x) -> pkmn <> "'s hidden ability is: " <> x
+                }
+            )
     -- Ignore other events (for now)
     _ -> pure ()
 
@@ -70,28 +107,40 @@ eventHandler e = do
 notifyLoop :: App DiscordHandler ()
 notifyLoop = do
   cfg <- ask
+  let startup = if cfgOnFly cfg then "Fly.io" else "localhost"
   let restCall_ = lift . void . restCall
-
   -- Notify that the bot has started, in my private channel.
   now <- systemSeconds <$> liftIO getSystemTime
   restCall_ $
-    DR.CreateMessage 1132000877415247903 ("ApriBot started at: <t:" <> T.pack (show now) <> ">")
-
+    DR.CreateMessage
+      1132000877415247903
+      ("ApriBot started on " <> startup <> " at: <t:" <> T.pack (show now) <> ">")
+  -- Post the post into the appropriate channel
+  let notifyPost :: Post -> App DiscordHandler ()
+      notifyPost post = do
+        case T.toLower (postSubreddit post) of
+          "pokemontrades" ->
+            restCall_ $
+              DR.CreateMessageDetailed
+                (cfgPtrChannelId cfg)
+                (makeMessageDetails post)
+          "bankballexchange" ->
+            restCall_ $
+              DR.CreateMessageDetailed
+                (cfgBbeChannelId cfg)
+                (makeMessageDetails post)
+          _ -> pure ()
+  -- Loop
   let chan = cfgChan cfg
   forever $ do
-    post <- liftIO $ readChan chan
-    case T.toLower (postSubreddit post) of
-      "pokemontrades" ->
-        restCall_ $
-          DR.CreateMessageDetailed
-            (cfgPtrChannelId cfg)
-            (makeMessageDetails post)
-      "bankballexchange" ->
-        restCall_ $
-          DR.CreateMessageDetailed
-            (cfgBbeChannelId cfg)
-            (makeMessageDetails post)
-      _ -> pure ()
+    event <- liftIO $ readChan chan
+    case event of
+      NotifyPostById pid -> do
+        redditEnv <- authenticateAsOwner
+        post <- runRedditT redditEnv $ getPost pid
+        notifyPost post
+      NotifyPost post -> do
+        notifyPost post
 
 -- * Helper functions
 

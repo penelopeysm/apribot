@@ -34,6 +34,7 @@ module Database
   ( addToDb,
     getLatestHits,
     getLatestNonHits,
+    wasHit,
     getTotalRows,
     getTotalMLAssignedRows,
     getTotalMLAssignedHits,
@@ -87,6 +88,13 @@ getLatestHits n conn =
 getLatestNonHits :: Int -> Connection -> IO [(Text, Text, Text, Text, Text, Text)]
 getLatestNonHits n conn =
   query_ conn (Query . T.pack $ (printf "SELECT id, url, title, submitter, time, flair FROM posts WHERE hit = 0 ORDER BY time DESC LIMIT %d" n :: String))
+
+wasHit :: Text -> Connection -> IO Int
+wasHit postId conn = do
+  hits <- queryNamed conn "SELECT hit FROM posts WHERE id = :id" [":id" := postId]
+  case hits of
+    [] -> pure 0
+    (h : _) -> pure (fromOnly h)
 
 getTotalRows :: Connection -> IO Int
 getTotalRows conn =

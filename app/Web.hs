@@ -8,11 +8,13 @@ import Data.Password.Bcrypt
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.IO as T
 import Data.Text.Lazy (fromStrict)
 import qualified Data.Text.Lazy as TL
 import Data.Time.Clock (secondsToDiffTime)
 import Database
 import Database.SQLite.Simple
+import DiscordBot (notifyDiscord)
 import Lucid
 import Reddit
 import Reddit.Auth (Token (..))
@@ -519,6 +521,9 @@ web = do
             then ST.redirect "/contribute"
             else do
               liftIO $ withConnection postsSql $ addVote postId voter vote
+              hit <- liftIO $ withConnection postsSql $ wasHit postId
+              lift $ atomically $ T.putStrLn ("Notifying about mislabelled post " <> postId)
+              when (hit == 0 && vote == 1) (lift $ notifyDiscord (NotifyPostById (PostID postId)))
               ST.redirect "/contribute"
         _ -> ST.redirect "/contrib_error"
 

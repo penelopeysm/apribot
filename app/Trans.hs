@@ -5,10 +5,12 @@
 module Trans
   ( App (..),
     Config (..),
+    Config.NotifyEvent (..),
     runApp,
     runAppWith,
     atomically,
     atomicallyWith,
+    authenticateAsOwner,
     Control.Monad.IO.Class.liftIO,
     Control.Monad.Reader.ask,
     Control.Monad.Reader.asks,
@@ -25,6 +27,7 @@ import Control.Concurrent (MVar, withMVar)
 import Control.Monad (forever, void, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Reader (MonadReader, MonadTrans, ReaderT, ask, asks, lift, runReaderT)
+import Reddit (authenticate, Credentials (..), RedditEnv)
 
 newtype App m a = App {unApp :: ReaderT Config m a}
   deriving (Functor, Applicative, Monad, MonadReader Config, MonadTrans)
@@ -53,3 +56,13 @@ atomically :: MonadIO m => IO () -> App m ()
 atomically action = do
   lock <- asks cfgLock
   liftIO $ atomicallyWith lock action
+
+-- | Authenticate to Reddit with owner credentials
+authenticateAsOwner :: (MonadIO m) => App m RedditEnv
+authenticateAsOwner = do
+  ownerUsername <- asks cfgRedditUsername
+  ownerPassword <- asks cfgRedditPassword
+  ownerClientId <- asks cfgRedditId
+  ownerClientSecret <- asks cfgRedditSecret
+  userAgent <- asks cfgUserAgent
+  liftIO $ authenticate OwnerCredentials {..} userAgent

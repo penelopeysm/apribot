@@ -28,9 +28,7 @@ isHit post = do
 -- | Process newly seen posts.
 process :: Post -> RedditT (App IO) ()
 process post = do
-  cfg <- lift ask
-  let chan = cfgChan cfg
-      postsSql = cfgPostsDbPath cfg
+  postsSql <- lift $ asks cfgPostsDbPath
   case T.toLower (postSubreddit post) of
     "pokemontrades" -> do
       hit <- lift $ isHit post
@@ -39,7 +37,7 @@ process post = do
           lift $ atomically $ printf "PTR Hit: %s\n%s\n%s\n" (unPostID (postId post)) (postTitle post) (postUrl post)
           liftIO $ do
             withConnection postsSql $ addToDb post True
-            notifyDiscord chan post
+          lift $ notifyDiscord (NotifyPost post)
         else do
           lift $ atomically $ printf "PTR Non-hit: %s\n%s\n%s\n" (unPostID (postId post)) (postTitle post) (postUrl post)
           liftIO $ do
@@ -48,8 +46,7 @@ process post = do
       lift $
         atomically $
           printf "BBE: %s\n%s\n%s\n" (unPostID (postId post)) (postTitle post) (postUrl post)
-      liftIO $ do
-        notifyDiscord chan post
+      lift $ notifyDiscord (NotifyPost post)
     _ -> pure ()
 
 -- | Fetch posts from pokemontrades and BankBallExchange.
