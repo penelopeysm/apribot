@@ -14,7 +14,7 @@ module DiscordBot (notifyDiscord, discordBot) where
 
 import Control.Concurrent (forkIO)
 import Control.Concurrent.Chan (readChan, writeChan)
-import Control.Exception (SomeException, try)
+import Control.Exception (try)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
@@ -51,19 +51,6 @@ notifyDiscord e = do
   chan <- asks cfgChan
   liftIO $ writeChan chan e
 
--- TODO: return a better type (lol)
-getHA :: Text -> IO (Either SomeException (Maybe Text))
-getHA p = try $ do
-  pkmn <- pokemon p
-  case filter paIsHidden (pokemonAbilities pkmn) of
-    [] -> pure Nothing
-    (x : _) -> do
-      abty <- ability $ name (paAbility x)
-      let englishName = filter (\n -> name (nameLanguage n) == "en") (abilityNames abty)
-      pure $ case englishName of
-        [] -> Nothing
-        (n : _) -> Just $ nameName n
-
 randomAbility :: IO Text
 randomAbility = do
   abId :: Int <- randomRIO (0, 358)
@@ -96,7 +83,7 @@ eventHandler e = do
       when ("!ha " `T.isPrefixOf` msg) $ do
         let pkmn = T.strip . T.drop 3 $ msg
         atomically $ print pkmn
-        ha <- liftIO $ getHA pkmn
+        ha <- liftIO $ try $ getHiddenAbility pkmn
         randomApp <- liftIO randomAbility
         atomically $ print ha
         restCall_ $
@@ -105,7 +92,7 @@ eventHandler e = do
             ( def
                 { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
                   DR.messageDetailedContent = case ha of
-                    Left _ -> "I don't think " <> pkmn <> " is a Pokemon, but if it was, it would have the hidden ability " <> randomApp <> "!"
+                    Left (_ :: PokeException) -> "I don't think " <> pkmn <> " is a Pokemon, but if it was, it would have the hidden ability " <> randomApp <> "!"
                     Right Nothing -> pkmn <> " has no hidden ability"
                     Right (Just x) -> pkmn <> "'s hidden ability is: " <> x
                 }
