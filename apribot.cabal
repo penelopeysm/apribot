@@ -83,7 +83,7 @@ executable apribot
                       cmark-gfm,
                       containers,
                       cookie,
-                      discord-haskell,
+                      discord-haskell >= 1.15.5,
                       lucid,
                       mtl,
                       password,

@@ -26,6 +26,8 @@ data Config = Config
     cfgPtrChannelId :: ChannelId,
     -- | Discord channel to post /r/bankballexchange posts to.
     cfgBbeChannelId :: ChannelId,
+    -- | Discord channel to create trade overflow threads in
+    cfgTradeOverflowChannelId :: ChannelId,
     -- | Port to listen on.
     cfgPort :: Int,
     -- | User agent to use for Reddit API requests.
@@ -34,8 +36,10 @@ data Config = Config
     cfgRedirectUri :: Text,
     -- | Path to the Python classifier script.
     cfgClassifierPath :: FilePath,
-    -- | Discord token (set via $DISCORD_APRIBOT_TOKEN)
+    -- | Discord token (set via $DISCORD_TOKEN)
     cfgDiscordToken :: Text,
+    -- | Discord application ID (set via $DISCORD_ID)
+    cfgDiscordId :: ApplicationId,
     -- | Reddit ID for crawler (set via $REDDIT_ID)
     cfgRedditId :: Text,
     -- | Reddit secret for crawler (set via $REDDIT_SECRET)
@@ -61,6 +65,7 @@ getConfig :: IO Config
 getConfig = do
   cfgOnFly <- isJust <$> lookupEnv "FLY_APP_NAME"
   cfgDiscordToken <- T.pack <$> getEnv "DISCORD_APRIBOT_TOKEN"
+  cfgDiscordId <- read <$> getEnv "DISCORD_ID"
   cfgRedditId <- T.pack <$> getEnv "REDDIT_ID"
   cfgRedditSecret <- T.pack <$> getEnv "REDDIT_SECRET"
   cfgRedditFrontendId <- T.pack <$> getEnv "REDDIT_FE_ID"
@@ -75,6 +80,7 @@ getConfig = do
 
   let cfgPtrChannelId = if cfgOnFly then 1120783589928345661 else 1132714928810238062
       cfgBbeChannelId = if cfgOnFly then 1120783566889037834 else 1132714951014875246
+      cfgTradeOverflowChannelId = 1133555612538646629
       cfgPort = 8080
       cfgUserAgent = "github:penelopeysm/apribot by /u/is_a_togekiss"
       cfgRedirectUri =

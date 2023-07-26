@@ -63,15 +63,7 @@ fetchPosts = do
 redditBot :: App IO ()
 redditBot = do
   atomically $ T.putStrLn "Starting Reddit bot..."
-
   cfg <- ask
-  ownerUsername <- asks cfgRedditUsername
-  ownerPassword <- asks cfgRedditPassword
-  ownerClientId <- asks cfgRedditId
-  ownerClientSecret <- asks cfgRedditSecret
-  userAgent <- asks cfgUserAgent
-  let creds = OwnerCredentials {..}
-
-  redditEnv <- liftIO $ authenticate creds userAgent
+  redditEnv <- authenticateAsOwner
   let settings = defaultStreamSettings {streamsDelay = 10, streamsStorageSize = 400}
   runRedditT redditEnv $ stream' settings process (runAppWith cfg) fetchPosts

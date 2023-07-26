@@ -9,6 +9,9 @@
 # deploy.
 
 FROM python:3.11.4-bookworm
+WORKDIR /
+COPY . .
+RUN git config --global --add safe.directory '*'
 
 # Install sqlite3
 RUN apt-get update && apt-get install -y sqlite3
@@ -23,10 +26,6 @@ RUN curl https://downloads.haskell.org/~ghcup/x86_64-linux-ghcup > /usr/bin/ghcu
 RUN ghcup -v install ghc --isolate /usr/local --force 9.4.5 && ghcup -v install cabal --isolate /usr/local/bin --force 3.6.2.0
 RUN cabal update
 RUN cabal build
-
-WORKDIR /
-COPY . .
-RUN git config --global --add safe.directory '*'
 
 CMD ["/bin/bash"]
 
