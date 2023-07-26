@@ -64,7 +64,7 @@ data Config = Config
 getConfig :: IO Config
 getConfig = do
   cfgOnFly <- isJust <$> lookupEnv "FLY_APP_NAME"
-  cfgDiscordToken <- T.pack <$> getEnv "DISCORD_APRIBOT_TOKEN"
+  cfgDiscordToken <- T.pack <$> getEnv "DISCORD_TOKEN"
   cfgDiscordId <- read <$> getEnv "DISCORD_ID"
   cfgRedditId <- T.pack <$> getEnv "REDDIT_ID"
   cfgRedditSecret <- T.pack <$> getEnv "REDDIT_SECRET"
@@ -80,7 +80,7 @@ getConfig = do
 
   let cfgPtrChannelId = if cfgOnFly then 1120783589928345661 else 1132714928810238062
       cfgBbeChannelId = if cfgOnFly then 1120783566889037834 else 1132714951014875246
-      cfgTradeOverflowChannelId = 1133555612538646629
+      cfgTradeOverflowChannelId = if cfgOnFly then 1133716162308489216 else 1133555612538646629
       cfgPort = 8080
       cfgUserAgent = "github:penelopeysm/apribot by /u/is_a_togekiss"
       cfgRedirectUri =
