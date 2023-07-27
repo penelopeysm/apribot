@@ -52,6 +52,8 @@ data Config = Config
     cfgRedditUsername :: Text,
     -- | Reddit password for the bot (set via $REDDIT_PASSWORD)
     cfgRedditPassword :: Text,
+    -- | Seconds between checking for Reddit posts
+    cfgRedditStreamDelay :: Double,
     -- | Lock to prevent multiple threads writing to stdout at once.
     cfgLock :: MVar (),
     -- | Channel to pass posts to Discord.
@@ -87,6 +89,7 @@ getConfig = do
         if cfgOnFly
           then "https://apribot.fly.dev/authorised"
           else "http://localhost:8080/authorised"
+      cfgRedditStreamDelay = 10
   cfgLock <- newMVar ()
   cfgChan <- newChan
   pure $ Config {..}

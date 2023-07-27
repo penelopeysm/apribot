@@ -27,7 +27,7 @@ import Control.Concurrent (MVar, withMVar)
 import Control.Monad (forever, void, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Reader (MonadReader, MonadTrans, ReaderT, ask, asks, lift, runReaderT)
-import Reddit (authenticate, Credentials (..), RedditEnv)
+import Reddit (Credentials (..), RedditEnv, authenticate)
 
 newtype App m a = App {unApp :: ReaderT Config m a}
   deriving (Functor, Applicative, Monad, MonadReader Config, MonadTrans)
@@ -47,12 +47,12 @@ runAppWith cfg app = runReaderT (unApp app) cfg
 
 -- | Run an IO action atomically, using the given lock. Useful when you've
 -- escaped from App into pure IO.
-atomicallyWith :: (MonadIO m) => MVar () -> IO () -> m ()
+atomicallyWith :: (MonadIO m) => MVar () -> IO a -> m a
 atomicallyWith lock action = do
   liftIO $ withMVar lock $ const action
 
 -- | Run an IO action atomically, using the lock in the config.
-atomically :: MonadIO m => IO () -> App m ()
+atomically :: (MonadIO m) => IO a -> App m a
 atomically action = do
   lock <- asks cfgLock
   liftIO $ atomicallyWith lock action

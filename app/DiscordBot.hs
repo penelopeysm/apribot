@@ -74,14 +74,17 @@ eventHandler e = do
       let msgText = T.strip (messageContent m)
       when ("!ha " `T.isPrefixOf` T.toLower msgText) $ do
         let pkmn = T.strip . T.drop 3 $ msgText
-        atomically $ print pkmn
-        ha <- liftIO $ try $ getHiddenAbility pkmn
-        randomApp <- liftIO randomAbility
-        atomically $ print ha
-        replyTo m Nothing $ case ha of
-          Left (_ :: PokeException) -> "I don't think " <> pkmn <> " is a Pokemon, but if it was, it would have the hidden ability " <> randomApp <> "!"
-          Right Nothing -> pkmn <> " has no hidden ability"
-          Right (Just x) -> pkmn <> "'s hidden ability is: " <> x
+        ha <- atomically $ do
+          print pkmn
+          ha <- liftIO $ try $ getHiddenAbility pkmn
+          print ha
+          pure ha
+        case ha of
+          Left (_ :: PokeException) -> do
+            randomApp <- liftIO randomAbility
+            replyTo m Nothing $ "I don't think " <> pkmn <> " is a Pokemon, but if it was, it would have the hidden ability " <> randomApp <> "!"
+          Right Nothing -> replyTo m Nothing $ pkmn <> " has no hidden ability"
+          Right (Just x) -> replyTo m Nothing $ pkmn <> "'s hidden ability is: " <> x
       -- Respond to spin-out thread requests
       -- TODO: factorise this out and maybe use an ExceptT. Goodness that indentation.
       when ("!thread" == T.toLower msgText) $ do
@@ -111,7 +114,15 @@ eventHandler e = do
                           -- TODO: remove check on authorId1 when we're ready to launch fully
                           when
                             ( authorId1 /= authorId2
-                                && authorId1 `elem` [236863453443260419, 109821271524589568, 282564750863368193]
+                                && authorId1
+                                  `elem` [ 236863453443260419,
+                                           109821271524589568,
+                                           282564750863368193,
+                                           181019499082809344,
+                                           476865243801190433,
+                                           398979201358888961,
+                                           769883623977123850
+                                         ]
                             )
                             $ do
                               eitherChannel <- lift $ restCall $ DR.GetChannel rcid
@@ -173,6 +184,36 @@ eventHandler e = do
                                 _ -> replyTo m Nothing "You can only use this command within a forum thread."
                       _ -> replyTo m Nothing "Could not get info about the first message in the channel."
               _ -> replyTo m Nothing "Could not get info about the message you replied to."
+      -- Respond to thread closure
+      when ("!close" == T.toLower msgText) $ do
+        let channelId = messageChannelId m
+        eitherChannel <- lift $ restCall $ DR.GetChannel channelId
+        case eitherChannel of
+          Left err -> do
+            atomically $ print err
+            replyTo m Nothing "Could not get info about the channel you replied in."
+          Right chn@(ChannelPublicThread {}) -> do
+            atomically $ print chn
+            eitherFirstMsg <- lift $ restCall $ DR.GetChannelMessages channelId (1, DR.AfterMessage 0)
+            case eitherFirstMsg of
+              Right [firstMsg] -> do
+                -- cfgDiscordId has the same value but wrong type for this
+                -- comparison
+                when
+                  ( userId (messageAuthor firstMsg) == (DiscordId . unId) (cfgDiscordId cfg)
+                      && ("Original post by <@" <> tshow (userId (messageAuthor m)) <> ">:") `T.isPrefixOf` messageContent firstMsg
+                  )
+                  $ do
+                    replyTo m Nothing "Closing and locking thread now; please ping a moderator if you need it reopened!"
+                    restCall_ $
+                      DR.ModifyChannel channelId $
+                        def
+                          { DR.modifyChannelThreadArchived = Just True,
+                            DR.modifyChannelThreadLocked = Just True
+                          }
+              _ -> replyTo m Nothing "Could not get the first message in the channel."
+          Right _ -> do
+            replyTo m Nothing "This command only works in Apribot's threads"
     -- Ignore other events (for now)
     _ -> pure ()
 

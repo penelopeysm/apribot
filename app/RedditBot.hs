@@ -65,5 +65,9 @@ redditBot = do
   atomically $ T.putStrLn "Starting Reddit bot..."
   cfg <- ask
   redditEnv <- authenticateAsOwner
-  let settings = defaultStreamSettings {streamsDelay = 10, streamsStorageSize = 400}
+  let settings =
+        defaultStreamSettings
+          { streamsDelay = cfgRedditStreamDelay cfg,
+            streamsStorageSize = 400
+          }
   runRedditT redditEnv $ stream' settings process (runAppWith cfg) fetchPosts
