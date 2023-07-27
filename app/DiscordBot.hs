@@ -153,7 +153,7 @@ eventHandler e = do
                                         restCall_ $
                                           DR.CreateMessageDetailed (channelId newThread) $
                                             def
-                                              { DR.messageDetailedContent = "> " <> messageContent firstMsg,
+                                              { DR.messageDetailedContent = T.unlines . map ("> " <>) . T.lines $ messageContent firstMsg,
                                                 DR.messageDetailedAllowedMentions = Just $ mentionOnly []
                                               }
                                         restCall_ $
@@ -165,7 +165,7 @@ eventHandler e = do
                                         restCall_ $
                                           DR.CreateMessageDetailed (channelId newThread) $
                                             def
-                                              { DR.messageDetailedContent = "> " <> messageContent repliedMsg,
+                                              { DR.messageDetailedContent = T.unlines . map ("> " <>) . T.lines $ messageContent repliedMsg,
                                                 DR.messageDetailedAllowedMentions = Just $ mentionOnly []
                                               }
                               _ -> replyTo m Nothing "You can only use this command within a forum thread."
