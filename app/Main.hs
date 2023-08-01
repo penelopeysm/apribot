@@ -20,5 +20,5 @@ main = runApp $ App $ do
   liftIO $ hSetBuffering stdout NoBuffering
   liftIO $
     mapConcurrently_
-      (runAppWith cfg) 
+      (runAppWith cfg)
       [web, redditBot, discordBot]

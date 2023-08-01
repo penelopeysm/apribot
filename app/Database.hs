@@ -44,9 +44,11 @@ module Database
     addVote,
     getNumVotes,
     getLastNVotesBy,
+    addNotifiedPost,
+    checkNotifiedStatus,
     addToken,
     getToken,
-    removeToken
+    removeToken,
   )
 where
 
@@ -57,6 +59,7 @@ import Data.Text.Encoding (decodeUtf8, encodeUtf8)
 import Data.Time.Format
 import Data.Time.Format.ISO8601
 import Database.SQLite.Simple
+import Discord.Types (ChannelId, DiscordId (..), MessageId, unId, unSnowflake)
 import Reddit
 import Reddit.Auth (Token (..), parseScopes, showScopes)
 import Text.Printf (printf)
@@ -156,6 +159,28 @@ getLastNVotesBy count username conn =
     conn
     "SELECT votes.id, posts.title, posts.url, posts.submitter, votes.vote FROM posts INNER JOIN votes ON posts.id=votes.id WHERE votes.username = :username ORDER BY votes.n DESC LIMIT :count;"
     [":username" := username, ":count" := count]
+
+addNotifiedPost :: ID Post -> ChannelId -> MessageId -> Connection -> IO ()
+addNotifiedPost postId channelId messageId conn = do
+  executeNamed
+    conn
+    "INSERT INTO discord (post_id, channel_id, message_id) VALUES (:post_id, :channel_id, :message_id)"
+    [ ":post_id" := unPostID postId,
+      ":channel_id" := (T.pack . show . unSnowflake . unId $ channelId),
+      ":message_id" := (T.pack . show . unSnowflake . unId $ messageId)
+    ]
+
+checkNotifiedStatus :: ID Post -> Connection -> IO (Maybe (ChannelId, MessageId))
+checkNotifiedStatus postId conn = do
+  notified <-
+    queryNamed
+      conn
+      "SELECT channel_id, message_id FROM discord WHERE post_id = :post_id"
+      [":post_id" := unPostID postId]
+  case notified of
+    [] -> pure Nothing
+    (channelId, messageId) : _ ->
+      pure $ Just (DiscordId . read . T.unpack $ channelId, DiscordId . read . T.unpack $ messageId)
 
 -- tokens.db
 

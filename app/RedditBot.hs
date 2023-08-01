@@ -55,7 +55,7 @@ fetchPosts = do
   env <- ask
   lift $ atomically $ T.putStrLn "Fetching posts from subreddits..."
   let ptr = runRedditT env $ subredditPosts 50 "pokemontrades" New
-      bbe = runRedditT env $ subredditPosts 50 "BankBallExchange" New
+      bbe = runRedditT env $ subredditPosts 5 "BankBallExchange" New
   (ptrPosts, bbePosts) <- liftIO $ concurrently ptr bbe
   pure $ ptrPosts <> bbePosts
 

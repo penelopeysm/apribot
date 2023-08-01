@@ -15,16 +15,18 @@ module DiscordBot (notifyDiscord, discordBot) where
 import Control.Concurrent (forkIO)
 import Control.Concurrent.Chan (readChan, writeChan)
 import Control.Exception (try)
-import Data.Text (Text)
+import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Data.Time.Clock.System (getSystemTime, systemSeconds)
+import Database (addNotifiedPost, checkNotifiedStatus)
+import Database.SQLite.Simple (withConnection)
 import Discord
 import qualified Discord.Requests as DR
 import Discord.Types
-import Pokeapi
+import Pokeapi (PokeException (..))
+import PokeapiBridge
 import Reddit (Post (..), getPost, runRedditT)
-import System.Random (randomRIO)
 import Trans
 
 -- | Run the Discord bot.
@@ -74,17 +76,19 @@ eventHandler e = do
       let msgText = T.strip (messageContent m)
       when ("!ha " `T.isPrefixOf` T.toLower msgText) $ do
         let pkmn = T.strip . T.drop 3 $ msgText
-        ha <- atomically $ do
+        ha' <- atomically $ do
           print pkmn
-          ha <- liftIO $ try $ getHiddenAbility pkmn
-          print ha
-          pure ha
-        case ha of
+          ha' <- liftIO $ try $ haSpecies (T.intercalate "-" . T.words $ pkmn)
+          print ha'
+          pure ha'
+        case ha' of
           Left (_ :: PokeException) -> do
             randomApp <- liftIO randomAbility
             replyTo m Nothing $ "I don't think " <> pkmn <> " is a Pokemon, but if it was, it would have the hidden ability " <> randomApp <> "!"
-          Right Nothing -> replyTo m Nothing $ pkmn <> " has no hidden ability"
-          Right (Just x) -> replyTo m Nothing $ pkmn <> "'s hidden ability is: " <> x
+          Right ps -> do
+            let makeText (name, Nothing) = name <> " has no hidden ability"
+                makeText (name, Just x) = name <> "'s hidden ability is: " <> x
+            replyTo m Nothing $ T.intercalate "\n" (map makeText ps)
       -- Respond to spin-out thread requests
       -- TODO: factorise this out and maybe use an ExceptT. Goodness that indentation.
       when ("!thread" `T.isPrefixOf` T.toLower msgText) $ do
@@ -99,16 +103,17 @@ eventHandler e = do
                     atomically $ print err
                     replyTo m Nothing "Could not get info about the message you replied to."
                   Right repliedMsg -> do
-                    let authorId1 = userId $ messageAuthor m
-                        author1 = userName $ messageAuthor m
-                        authorId2 = userId $ messageAuthor repliedMsg
-                        author2 = userName $ messageAuthor repliedMsg
+                    let authorId1 = userId (messageAuthor m)
+                        authorId2 = userId (messageAuthor repliedMsg)
+                    author1 <- getUserNick (messageGuildId m) (messageAuthor m)
+                    author2 <- getUserNick (messageGuildId m) (messageAuthor repliedMsg)
                     eitherFirstMsg <- lift $ restCall $ DR.GetChannelMessages rcid (1, DR.AfterMessage 0)
                     case eitherFirstMsg of
                       Left errr' -> do
                         atomically $ print errr'
                         replyTo m Nothing "Could not get info about the first message in the channel."
                       Right [firstMsg] -> do
+                        atomically $ print (messageAuthor firstMsg)
                         when (authorId1 == userId (messageAuthor firstMsg)) $ do
                           when (authorId1 == authorId2) $ replyTo m Nothing "You can't trade with yourself!"
                           when (authorId1 /= authorId2) $ do
@@ -200,12 +205,13 @@ eventHandler e = do
                     restCall_ $
                       DR.ModifyChannel channelId $
                         def
-                          { DR.modifyChannelThreadArchived = Just True,
+                          { DR.modifyChannelName = Just $ "[Closed] " <> fromMaybe "" (channelThreadName chn),
+                            DR.modifyChannelThreadArchived = Just True,
                             DR.modifyChannelThreadLocked = Just True
                           }
               _ -> replyTo m Nothing "Could not get the first message in the channel."
-          Right _ -> do
-            replyTo m Nothing "This command only works in Apribot's threads"
+          Right _ ->
+            pure ()
     -- Ignore other events (for now)
     _ -> pure ()
 
@@ -222,21 +228,29 @@ notifyDiscord e = do
 notifyLoop :: App DiscordHandler ()
 notifyLoop = do
   cfg <- ask
-  -- Post the post into the appropriate channel
+  -- Post the post into the appropriate channel, if it hasn't already been
+  -- notified about
   let notifyPost :: Post -> App DiscordHandler ()
       notifyPost post = do
-        case T.toLower (postSubreddit post) of
-          "pokemontrades" ->
-            restCall_ $
-              DR.CreateMessageDetailed
-                (cfgPtrChannelId cfg)
-                (makeMessageDetails post)
-          "bankballexchange" ->
-            restCall_ $
-              DR.CreateMessageDetailed
-                (cfgBbeChannelId cfg)
-                (makeMessageDetails post)
-          _ -> pure ()
+        postsSql <- asks cfgPostsDbPath
+        alreadyNotified <- liftIO $ withConnection postsSql $ checkNotifiedStatus (postId post)
+        case alreadyNotified of
+          Just _ -> pure ()
+          Nothing -> do
+            let notify chanId = do
+                  eitherMessage <- lift $ restCall $ DR.CreateMessageDetailed chanId (makeMessageDetails post)
+                  pure $ case eitherMessage of
+                    Right m -> Just m
+                    Left _ -> Nothing
+            maybeMessage <-
+              case T.toLower (postSubreddit post) of
+                "pokemontrades" -> notify (cfgPtrChannelId cfg)
+                "bankballexchange" -> notify (cfgBbeChannelId cfg)
+                _ -> pure Nothing
+            case maybeMessage of
+              Nothing -> pure ()
+              Just msg -> do
+                liftIO $ withConnection postsSql $ addNotifiedPost (postId post) (messageChannelId msg) (messageId msg)
   -- Loop
   let chan = cfgChan cfg
   forever $ do
@@ -250,16 +264,6 @@ notifyLoop = do
         notifyPost post
 
 -- * Helper functions
-
--- | Generate a random ability. TODO: Should probably be refactored into Pokeapi
-randomAbility :: IO Text
-randomAbility = do
-  abId :: Int <- randomRIO (0, 358)
-  abty <- ability (T.pack $ show abId)
-  let englishName = filter (\n -> name (nameLanguage n) == "en") (abilityNames abty)
-  pure $ case englishName of
-    [] -> "You managed to break the bot. Congratulations!"
-    (n : _) -> nameName n
 
 -- | For convenience
 restCall_ :: (Request (r a), FromJSON a) => r a -> App (ReaderT DiscordHandle IO) ()
@@ -350,3 +354,17 @@ mentionOnly userIds =
       DR.mentionRoleIds = [],
       DR.mentionRepliedUser = True
     }
+
+-- | Attempt to get user's server nickname. Falls back to global username.
+getUserNick :: Maybe GuildId -> User -> App DiscordHandler T.Text
+getUserNick mbGuildId user = do
+  let fallback = userName user
+  case mbGuildId of
+    Nothing -> pure fallback
+    Just guildId -> do
+      eitherMember <- lift $ restCall $ DR.GetGuildMember guildId (userId user)
+      case eitherMember of
+        Left _ -> pure fallback
+        Right member -> case memberNick member of
+          Nothing -> pure fallback
+          Just nick -> pure nick

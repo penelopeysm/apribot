@@ -71,6 +71,7 @@ executable apribot
                       Database,
                       DiscordBot,
                       Paths_apribot,
+                      PokeapiBridge,
                       RedditBot,
                       Trans,
                       Utils,
