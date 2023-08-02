@@ -67,151 +67,13 @@ startup = do
 --    future.
 eventHandler :: Event -> App DiscordHandler ()
 eventHandler e = do
-  cfg <- ask
-  -- Print the event
   atomically $ print e >> putStrLn "" >> putStrLn ""
   case e of
-    -- Respond to HA requests
     MessageCreate m -> do
       let msgText = T.strip (messageContent m)
-      when ("!ha " `T.isPrefixOf` T.toLower msgText) $ do
-        let pkmn = T.strip . T.drop 3 $ msgText
-        ha' <- atomically $ do
-          print pkmn
-          ha' <- liftIO $ try $ haSpecies (T.intercalate "-" . T.words $ pkmn)
-          print ha'
-          pure ha'
-        case ha' of
-          Left (_ :: PokeException) -> do
-            randomApp <- liftIO randomAbility
-            replyTo m Nothing $ "I don't think " <> pkmn <> " is a Pokemon, but if it was, it would have the hidden ability " <> randomApp <> "!"
-          Right ps -> do
-            let makeText (name, Nothing) = name <> " has no hidden ability"
-                makeText (name, Just x) = name <> "'s hidden ability is: " <> x
-            replyTo m Nothing $ T.intercalate "\n" (map makeText ps)
-      -- Respond to spin-out thread requests
-      -- TODO: factorise this out and maybe use an ExceptT. Goodness that indentation.
-      when ("!thread" `T.isPrefixOf` T.toLower msgText) $ do
-        case messageReference m of
-          Nothing -> replyTo m Nothing "You should use `!thread` when replying to your trading partner's message"
-          Just ref -> do
-            case (referenceChannelId ref, referenceMessageId ref) of
-              (Just rcid, Just rmid) -> do
-                eitherRepliedMsg <- lift $ restCall $ DR.GetChannelMessage (rcid, rmid)
-                case eitherRepliedMsg of
-                  Left err -> do
-                    atomically $ print err
-                    replyTo m Nothing "Could not get info about the message you replied to."
-                  Right repliedMsg -> do
-                    let authorId1 = userId (messageAuthor m)
-                        authorId2 = userId (messageAuthor repliedMsg)
-                    author1 <- getUserNick (messageGuildId m) (messageAuthor m)
-                    author2 <- getUserNick (messageGuildId m) (messageAuthor repliedMsg)
-                    eitherFirstMsg <- lift $ restCall $ DR.GetChannelMessages rcid (1, DR.AfterMessage 0)
-                    case eitherFirstMsg of
-                      Left errr' -> do
-                        atomically $ print errr'
-                        replyTo m Nothing "Could not get info about the first message in the channel."
-                      Right [firstMsg] -> do
-                        atomically $ print (messageAuthor firstMsg)
-                        when (authorId1 == userId (messageAuthor firstMsg)) $ do
-                          when (authorId1 == authorId2) $ replyTo m Nothing "You can't trade with yourself!"
-                          when (authorId1 /= authorId2) $ do
-                            eitherChannel <- lift $ restCall $ DR.GetChannel rcid
-                            case eitherChannel of
-                              Left errr -> do
-                                atomically $ print errr
-                                replyTo m Nothing "Could not get info about the channel you replied to."
-                              Right chn@(ChannelPublicThread {}) -> do
-                                case channelThreadName chn of
-                                  Nothing -> replyTo m Nothing "You can only use this command within a forum thread."
-                                  Just tname -> do
-                                    let threadName = author1 <> " & " <> author2 <> " | " <> tname
-                                    atomically $ T.putStrLn $ "Creating thread for " <> author1 <> " and " <> author2
-                                    eitherNewThread <-
-                                      lift $
-                                        restCall $
-                                          DR.StartThreadNoMessage
-                                            (cfgTradeOverflowChannelId cfg)
-                                            DR.StartThreadNoMessageOpts
-                                              { DR.startThreadNoMessageBaseOpts =
-                                                  DR.StartThreadOpts
-                                                    { DR.startThreadName = threadName,
-                                                      DR.startThreadAutoArchive = Just 1440,
-                                                      DR.startThreadRateLimit = Nothing
-                                                    },
-                                                DR.startThreadNoMessageType = 11, -- public thread
-                                                DR.startThreadNoMessageInvitable = Nothing
-                                              }
-                                    case eitherNewThread of
-                                      Left err' -> do
-                                        atomically $ print err'
-                                        replyTo m Nothing "Could not create thread."
-                                      Right newThread -> do
-                                        replyTo m (Just [authorId1, authorId2]) $ "Created thread for <@" <> tshow authorId1 <> "> and <@" <> tshow authorId2 <> "> at: " <> getChannelUrl newThread
-                                        restCall_ $
-                                          DR.CreateMessageDetailed (channelId newThread) $
-                                            def
-                                              { DR.messageDetailedContent = "Original post by <@" <> tshow authorId1 <> ">: https://discord.com/channels/" <> tshow (channelGuild chn) <> "/" <> tshow rcid <> "/" <> tshow (messageId firstMsg),
-                                                DR.messageDetailedAllowedMentions = Just $ mentionOnly []
-                                              }
-                                        restCall_ $
-                                          DR.CreateMessageDetailed (channelId newThread) $
-                                            def
-                                              { DR.messageDetailedContent = T.unlines . map ("> " <>) . T.lines $ messageContent firstMsg,
-                                                DR.messageDetailedAllowedMentions = Just $ mentionOnly []
-                                              }
-                                        restCall_ $
-                                          DR.CreateMessageDetailed (channelId newThread) $
-                                            def
-                                              { DR.messageDetailedContent = "Reply by <@" <> tshow authorId2 <> ">: https://discord.com/channels/" <> tshow (channelGuild chn) <> "/" <> tshow rcid <> "/" <> tshow rmid,
-                                                DR.messageDetailedAllowedMentions = Just $ mentionOnly []
-                                              }
-                                        restCall_ $
-                                          DR.CreateMessageDetailed (channelId newThread) $
-                                            def
-                                              { DR.messageDetailedContent = T.unlines . map ("> " <>) . T.lines $ messageContent repliedMsg,
-                                                DR.messageDetailedAllowedMentions = Just $ mentionOnly []
-                                              }
-                              _ -> replyTo m Nothing "You can only use this command within a forum thread."
-                      _ -> replyTo m Nothing "Could not get info about the first message in the channel."
-              _ -> replyTo m Nothing "Could not get info about the message you replied to."
-      -- Respond to thread closure
-      when (any (`T.isPrefixOf` T.toLower msgText) ["!close", "[close]"]) $ do
-        let channelId = messageChannelId m
-        eitherChannel <- lift $ restCall $ DR.GetChannel channelId
-        case eitherChannel of
-          Left err -> do
-            atomically $ print err
-            replyTo m Nothing "Could not get info about the channel you replied in."
-          Right chn@(ChannelPublicThread {}) -> do
-            atomically $ print chn
-            eitherFirstMsg <- lift $ restCall $ DR.GetChannelMessages channelId (1, DR.AfterMessage 0)
-            case eitherFirstMsg of
-              Right [firstMsg] -> do
-                -- cfgDiscordId has the same value but wrong type for this
-                -- comparison
-                let threadCreatorId = userId (messageAuthor firstMsg)
-                let closerId = userId (messageAuthor m)
-                when
-                  -- Case 1: ApriBot spun out a thread for a user
-                  ( ( threadCreatorId == (DiscordId . unId) (cfgDiscordId cfg)
-                        && ("Original post by <@" <> tshow closerId <> ">:") `T.isPrefixOf` messageContent firstMsg
-                    )
-                      || (threadCreatorId == closerId) -- Case 2: the user made the thread themselves
-                  )
-                  $ do
-                    replyTo m Nothing "Closing and locking thread now; please ping a moderator if you need it reopened!"
-                    restCall_ $
-                      DR.ModifyChannel channelId $
-                        def
-                          { DR.modifyChannelName = Just $ "[Closed] " <> fromMaybe "" (channelThreadName chn),
-                            DR.modifyChannelThreadArchived = Just True,
-                            DR.modifyChannelThreadLocked = Just True
-                          }
-              _ -> replyTo m Nothing "Could not get the first message in the channel."
-          Right _ ->
-            pure ()
+      when ("!ha " `T.isPrefixOf` T.toLower msgText) (respondHA m)
+      when ("!thread" `T.isPrefixOf` T.toLower msgText) (makeThread m)
+      when (any (`T.isPrefixOf` T.toLower msgText) ["!close", "[close]"]) (closeThread m)
     -- Ignore other events (for now)
     _ -> pure ()
 
@@ -262,6 +124,150 @@ notifyLoop = do
         notifyPost post
       NotifyPost post -> do
         notifyPost post
+
+respondHA :: Message -> App DiscordHandler ()
+respondHA m = do
+  let msgText = T.strip (messageContent m)
+      pkmn = T.strip . T.drop 3 $ msgText
+  ha' <- atomically $ do
+    print pkmn
+    ha' <- liftIO $ try $ haSpecies (T.intercalate "-" . T.words $ pkmn)
+    print ha'
+    pure ha'
+  case ha' of
+    Left (_ :: PokeException) -> do
+      randomApp <- liftIO randomAbility
+      replyTo m Nothing $ "I don't think " <> pkmn <> " is a Pokemon, but if it was, it would have the hidden ability " <> randomApp <> "!"
+    Right ps -> do
+      let makeText (name, Nothing) = name <> " has no hidden ability"
+          makeText (name, Just x) = name <> "'s hidden ability is: " <> x
+      replyTo m Nothing $ T.intercalate "\n" (map makeText ps)
+
+makeThread :: Message -> App DiscordHandler ()
+makeThread m = do
+  cfg <- ask
+  case messageReference m of
+    Nothing -> replyTo m Nothing "You should use `!thread` when replying to your trading partner's message"
+    Just ref -> do
+      case (referenceChannelId ref, referenceMessageId ref) of
+        (Just rcid, Just rmid) -> do
+          eitherRepliedMsg <- lift $ restCall $ DR.GetChannelMessage (rcid, rmid)
+          case eitherRepliedMsg of
+            Left err -> do
+              atomically $ print err
+              replyTo m Nothing "Could not get info about the message you replied to."
+            Right repliedMsg -> do
+              let authorId1 = userId (messageAuthor m)
+                  authorId2 = userId (messageAuthor repliedMsg)
+              author1 <- getUserNick (messageGuildId m) (messageAuthor m)
+              author2 <- getUserNick (messageGuildId m) (messageAuthor repliedMsg)
+              eitherFirstMsg <- lift $ restCall $ DR.GetChannelMessages rcid (1, DR.AfterMessage 0)
+              case eitherFirstMsg of
+                Left errr' -> do
+                  atomically $ print errr'
+                  replyTo m Nothing "Could not get info about the first message in the channel."
+                Right [firstMsg] -> do
+                  atomically $ print (messageAuthor firstMsg)
+                  when (authorId1 == userId (messageAuthor firstMsg)) $ do
+                    when (authorId1 == authorId2) $ replyTo m Nothing "You can't trade with yourself!"
+                    when (authorId1 /= authorId2) $ do
+                      eitherChannel <- lift $ restCall $ DR.GetChannel rcid
+                      case eitherChannel of
+                        Left errr -> do
+                          atomically $ print errr
+                          replyTo m Nothing "Could not get info about the channel you replied to."
+                        Right chn@(ChannelPublicThread {}) -> do
+                          case channelThreadName chn of
+                            Nothing -> replyTo m Nothing "You can only use this command within a forum thread."
+                            Just tname -> do
+                              let threadName = author1 <> " & " <> author2 <> " | " <> tname
+                              atomically $ T.putStrLn $ "Creating thread for " <> author1 <> " and " <> author2
+                              eitherNewThread <-
+                                lift $
+                                  restCall $
+                                    DR.StartThreadNoMessage
+                                      (cfgTradeOverflowChannelId cfg)
+                                      DR.StartThreadNoMessageOpts
+                                        { DR.startThreadNoMessageBaseOpts =
+                                            DR.StartThreadOpts
+                                              { DR.startThreadName = threadName,
+                                                DR.startThreadAutoArchive = Just 1440,
+                                                DR.startThreadRateLimit = Nothing
+                                              },
+                                          DR.startThreadNoMessageType = 11, -- public thread
+                                          DR.startThreadNoMessageInvitable = Nothing
+                                        }
+                              case eitherNewThread of
+                                Left err' -> do
+                                  atomically $ print err'
+                                  replyTo m Nothing "Could not create thread."
+                                Right newThread -> do
+                                  replyTo m (Just [authorId1, authorId2]) $ "Created thread for <@" <> tshow authorId1 <> "> and <@" <> tshow authorId2 <> "> at: " <> getChannelUrl newThread
+                                  restCall_ $
+                                    DR.CreateMessageDetailed (channelId newThread) $
+                                      def
+                                        { DR.messageDetailedContent = "Original post by <@" <> tshow authorId1 <> ">: https://discord.com/channels/" <> tshow (channelGuild chn) <> "/" <> tshow rcid <> "/" <> tshow (messageId firstMsg),
+                                          DR.messageDetailedAllowedMentions = Just $ mentionOnly []
+                                        }
+                                  restCall_ $
+                                    DR.CreateMessageDetailed (channelId newThread) $
+                                      def
+                                        { DR.messageDetailedContent = T.unlines . map ("> " <>) . T.lines $ messageContent firstMsg,
+                                          DR.messageDetailedAllowedMentions = Just $ mentionOnly []
+                                        }
+                                  restCall_ $
+                                    DR.CreateMessageDetailed (channelId newThread) $
+                                      def
+                                        { DR.messageDetailedContent = "Reply by <@" <> tshow authorId2 <> ">: https://discord.com/channels/" <> tshow (channelGuild chn) <> "/" <> tshow rcid <> "/" <> tshow rmid,
+                                          DR.messageDetailedAllowedMentions = Just $ mentionOnly []
+                                        }
+                                  restCall_ $
+                                    DR.CreateMessageDetailed (channelId newThread) $
+                                      def
+                                        { DR.messageDetailedContent = T.unlines . map ("> " <>) . T.lines $ messageContent repliedMsg,
+                                          DR.messageDetailedAllowedMentions = Just $ mentionOnly []
+                                        }
+                        _ -> replyTo m Nothing "You can only use this command within a forum thread."
+                _ -> replyTo m Nothing "Could not get info about the first message in the channel."
+        _ -> replyTo m Nothing "Could not get info about the message you replied to."
+
+closeThread :: Message -> App DiscordHandler ()
+closeThread m = do
+  cfg <- ask
+  let channelId = messageChannelId m
+  eitherChannel <- lift $ restCall $ DR.GetChannel channelId
+  case eitherChannel of
+    Left err -> do
+      atomically $ print err
+      replyTo m Nothing "Could not get info about the channel you replied in."
+    Right chn@(ChannelPublicThread {}) -> do
+      atomically $ print chn
+      eitherFirstMsg <- lift $ restCall $ DR.GetChannelMessages channelId (1, DR.AfterMessage 0)
+      case eitherFirstMsg of
+        Right [firstMsg] -> do
+          -- cfgDiscordId has the same value but wrong type for this
+          -- comparison
+          let threadCreatorId = userId (messageAuthor firstMsg)
+          let closerId = userId (messageAuthor m)
+          when
+            -- Case 1: ApriBot spun out a thread for a user
+            ( ( threadCreatorId == (DiscordId . unId) (cfgDiscordId cfg)
+                  && ("Original post by <@" <> tshow closerId <> ">:") `T.isPrefixOf` messageContent firstMsg
+              )
+                || (threadCreatorId == closerId) -- Case 2: the user made the thread themselves
+            )
+            $ do
+              replyTo m Nothing "Closing and locking thread now; please ping a moderator if you need it reopened!"
+              restCall_ $
+                DR.ModifyChannel channelId $
+                  def
+                    { DR.modifyChannelName = Just $ "[Closed] " <> fromMaybe "" (channelThreadName chn),
+                      DR.modifyChannelThreadArchived = Just True,
+                      DR.modifyChannelThreadLocked = Just True
+                    }
+        _ -> replyTo m Nothing "Could not get the first message in the channel."
+    Right _ ->
+      pure ()
 
 -- * Helper functions
 
