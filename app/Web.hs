@@ -11,13 +11,13 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Data.Text.Lazy (fromStrict)
 import qualified Data.Text.Lazy as TL
-import Data.Time.Clock (secondsToDiffTime)
+import Data.Time.Clock (secondsToDiffTime, getCurrentTime)
 import Database
 import Database.SQLite.Simple
 import DiscordBot (notifyDiscord)
 import Lucid
 import Reddit
-import Reddit.Auth (Token (..))
+import Reddit.Auth (Token (..), refresh)
 import Text.HTML.SanitizeXSS (sanitizeBalance)
 import Text.Printf (printf)
 import Trans
@@ -40,6 +40,8 @@ retrieveRedditEnv :: ST.ActionT TL.Text (App IO) (Maybe RedditEnv)
 retrieveRedditEnv = do
   userAgent <- asks cfgUserAgent
   tokensSql <- asks cfgTokensDbPath
+  clientId <- asks cfgRedditFrontendId
+  clientSecret <- asks cfgRedditFrontendSecret
 
   maybeCookie <- SC.getCookie tokenCookieName
   case maybeCookie of
@@ -47,8 +49,19 @@ retrieveRedditEnv = do
     Just sessionId -> do
       maybeToken <- liftIO $ withConnection tokensSql $ getToken sessionId
       case maybeToken of
-        Just t -> Just <$> liftIO (mkEnvFromToken t userAgent)
         Nothing -> pure Nothing
+        Just t -> do
+          -- Check if the token is expired
+          now <- liftIO getCurrentTime
+          if now > tokenExpiresAt t
+            then do
+              -- If it is, refresh the token, update the database, and create a new redditEnv from it
+              rt <- liftIO $ refresh clientId clientSecret userAgent t
+              lift $ atomically $ T.putStrLn "refreshing token"
+              liftIO $ withConnection tokensSql $ updateToken sessionId rt
+              Just <$> liftIO (mkEnvFromToken rt userAgent)
+              -- If it's still valid, create a new redditEnv from this token
+            else Just <$> liftIO (mkEnvFromToken t userAgent)
 
 -- | Make a new RedditEnv by requesting a token. This is to be used on the
 -- redirect URI and assumes that the user has been redirected to here after
@@ -85,7 +98,7 @@ makeNewRedditEnv = do
       let sessionCookie = SC.makeSimpleCookie tokenCookieName sessionId
       SC.setCookie $
         sessionCookie
-          { C.setCookieExpires = Just (tokenExpiresAt t),
+          { C.setCookieMaxAge = Just $ secondsToDiffTime $ 2 * 60 * 60 * 24 * 365,  -- 2 years
             C.setCookieHttpOnly = True,
             C.setCookieSameSite = Just C.sameSiteLax,
             C.setCookieSecure = True
@@ -500,7 +513,7 @@ web = do
                   { authUrlClientID = clientId,
                     authUrlState = state,
                     authUrlRedirectUri = redirectUri,
-                    authUrlDuration = Temporary,
+                    authUrlDuration = Permanent,
                     authUrlScopes = Set.singleton ScopeIdentity
                   }
 

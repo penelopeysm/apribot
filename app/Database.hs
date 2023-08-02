@@ -49,6 +49,7 @@ module Database
     addToken,
     getToken,
     removeToken,
+    updateToken,
   )
 where
 
@@ -184,35 +185,39 @@ checkNotifiedStatus postId conn = do
 
 -- tokens.db
 
-serialiseToken :: Token -> (Text, Text, Text, Text)
+serialiseToken :: Token -> (Text, Text, Text, Text, Text)
 serialiseToken tkn =
   ( decodeUtf8 $ token tkn,
     decodeUtf8 $ tokenType tkn,
     T.pack $ iso8601Show $ tokenExpiresAt tkn,
-    showScopes $ tokenScopes tkn
+    showScopes $ tokenScopes tkn,
+    fromMaybe "" (tokenRefreshToken tkn)
   )
 
-deserialiseToken :: (Text, Text, Text, Text) -> Token
-deserialiseToken (token, tokenType, expiresAt, scopes) =
+deserialiseToken :: (Text, Text, Text, Text, Text) -> Token
+deserialiseToken (token, tokenType, expiresAt, scopes, refresh_token) =
   Token
     { token = encodeUtf8 token,
       tokenType = encodeUtf8 tokenType,
       tokenExpiresAt = fromJust $ iso8601ParseM (T.unpack expiresAt),
       tokenScopes = parseScopes scopes,
-      tokenRefreshToken = Nothing
+      tokenRefreshToken = case refresh_token of
+        "" -> Nothing
+        _ -> Just refresh_token
     }
 
 addToken :: Text -> Token -> Connection -> IO ()
 addToken identifier tkn conn = do
-  let (token, tokenType, expiresAt, scopes) = serialiseToken tkn
+  let (token, tokenType, expiresAt, scopes, refreshToken) = serialiseToken tkn
   executeNamed
     conn
-    "INSERT INTO tokens (id, token, token_type, expires_at, scopes) VALUES (:id, :token, :token_type, :expires_at, :scopes) ON CONFLICT(id) DO UPDATE SET token = :token, token_type = :token_type, expires_at = :expires_at, scopes = :scopes WHERE id = :id;"
+    "INSERT INTO tokens (id, token, token_type, expires_at, scopes, refresh_token) VALUES (:id, :token, :token_type, :expires_at, :scopes, :refresh_token) ON CONFLICT(id) DO UPDATE SET token = :token, token_type = :token_type, expires_at = :expires_at, scopes = :scopes, refresh_token = :refresh_token WHERE id = :id;"
     [ ":id" := identifier,
       ":token" := token,
       ":token_type" := tokenType,
       ":expires_at" := expiresAt,
-      ":scopes" := scopes
+      ":scopes" := scopes,
+      ":refresh_token" := refreshToken
     ]
 
 getToken :: Text -> Connection -> IO (Maybe Token)
@@ -220,7 +225,7 @@ getToken identifier conn = do
   tokens <-
     queryNamed
       conn
-      "SELECT token, token_type, expires_at, scopes FROM tokens WHERE id = :id"
+      "SELECT token, token_type, expires_at, scopes, refresh_token FROM tokens WHERE id = :id"
       [":id" := identifier]
   pure $ case tokens of
     [] -> Nothing
@@ -229,3 +234,16 @@ getToken identifier conn = do
 removeToken :: Text -> Connection -> IO ()
 removeToken identifier conn = do
   executeNamed conn "DELETE FROM tokens WHERE id = :id" [":id" := identifier]
+
+updateToken :: Text -> Token -> Connection -> IO ()
+updateToken identifier tkn conn = do
+  let (token, tokenType, expiresAt, scopes, _) = serialiseToken tkn
+  executeNamed
+    conn
+    "UPDATE tokens SET token = :token, token_type = :token_type, expires_at = :expires_at, scopes = :scopes WHERE id = :id;"
+    [ ":id" := identifier,
+      ":token" := token,
+      ":token_type" := tokenType,
+      ":expires_at" := expiresAt,
+      ":scopes" := scopes
+    ]
