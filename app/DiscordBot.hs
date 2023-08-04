@@ -15,7 +15,9 @@ module DiscordBot (notifyDiscord, discordBot) where
 import Control.Concurrent (forkIO)
 import Control.Concurrent.Chan (readChan, writeChan)
 import Control.Exception (try)
-import Data.Maybe (fromMaybe)
+import Data.List (nub)
+import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Data.Time.Clock.System (getSystemTime, systemSeconds)
@@ -27,6 +29,7 @@ import Discord.Types
 import Pokeapi (PokeException (..))
 import PokeapiBridge
 import Reddit (Post (..), getPost, runRedditT)
+import Text.Printf (printf)
 import Trans
 
 -- | Run the Discord bot.
@@ -71,6 +74,7 @@ eventHandler e = do
   case e of
     MessageCreate m -> do
       let msgText = T.strip (messageContent m)
+      when ("!em " `T.isPrefixOf` T.toLower msgText) (respondEM m)
       when ("!ha " `T.isPrefixOf` T.toLower msgText) (respondHA m)
       when ("!thread" `T.isPrefixOf` T.toLower msgText) (makeThread m)
       when (any (`T.isPrefixOf` T.toLower msgText) ["!close", "[close]"]) (closeThread m)
@@ -125,23 +129,108 @@ notifyLoop = do
       NotifyPost post -> do
         notifyPost post
 
+respondEM :: Message -> App DiscordHandler ()
+respondEM m = do
+  let msgWords = T.words . T.toLower . T.strip $ messageContent m
+  result <- case msgWords of
+    "!em" : "usum" : rest -> do
+      let pkmn = T.intercalate "-" rest
+      ems <- liftIO $ try $ em SwSh pkmn
+      pure $ Right (pkmn, "USUM" :: T.Text, ems)
+    "!em" : "swsh" : rest -> do
+      let pkmn = T.intercalate "-" rest
+      ems <- liftIO $ try $ em SwSh pkmn
+      pure $ Right (pkmn, "SwSh" :: T.Text, ems)
+    "!em" : "bdsp" : rest -> do
+      let pkmn = T.intercalate "-" rest
+      ems <- liftIO $ try $ em BDSP pkmn
+      pure $ Right (pkmn, "BDSP", ems)
+    "!em" : "sv" : rest -> do
+      let pkmn = T.intercalate "-" rest
+      ems <- liftIO $ try $ em SV pkmn
+      pure $ Right (pkmn, "SV", ems)
+    _ -> pure $ Left "usage: `!em game pokemon` (game is swsh, bdsp, or sv). e.g. `!em swsh togepi`"
+  case result of
+    Left err -> replyTo m Nothing err
+    Right (pkmn, game, ems) -> do
+      case ems of
+        Left (_ :: PokeException) -> do
+          moves <- liftIO randomMoves
+          replyTo m Nothing $ "I don't think " <> pkmn <> " is a Pokemon, but if it was, it would have the egg moves: " <> T.intercalate ", " moves <> "!"
+        Right [] ->
+          replyTo m Nothing . T.pack $ printf "%s has no egg moves in %s" pkmn game
+        Right ems' ->
+          replyTo m Nothing . T.pack $ printf "%s egg moves in %s: %s" pkmn game (T.intercalate ", " ems')
+
 respondHA :: Message -> App DiscordHandler ()
 respondHA m = do
   let msgText = T.strip (messageContent m)
       pkmn = T.strip . T.drop 3 $ msgText
-  ha' <- atomically $ do
+      makeEmbed :: (Text, Text) -> Maybe CreateEmbed
+      makeEmbed (ha', desc') =
+        if desc' == ""
+          then Nothing
+          else
+            Just $
+              def
+                { createEmbedTitle = ha',
+                  createEmbedDescription = desc',
+                  createEmbedUrl =
+                    "https://bulbapedia.bulbagarden.net/wiki/"
+                      <> (T.intercalate "_" . T.words $ ha')
+                      <> "_(Ability)",
+                  createEmbedColor = Just DiscordColorLuminousVividPink
+                }
+  haDetails <- atomically $ do
     print pkmn
-    ha' <- liftIO $ try $ haSpecies (T.intercalate "-" . T.words $ pkmn)
-    print ha'
-    pure ha'
-  case ha' of
+    ha <- liftIO $ try $ haSpecies (T.intercalate "-" . T.words $ pkmn)
+    print ha
+    pure ha
+  case haDetails of
+    -- Not a Pokemon
     Left (_ :: PokeException) -> do
-      randomApp <- liftIO randomAbility
-      replyTo m Nothing $ "I don't think " <> pkmn <> " is a Pokemon, but if it was, it would have the hidden ability " <> randomApp <> "!"
-    Right ps -> do
+      (ha', desc') <- liftIO randomAbility
+      restCall_ $
+        DR.CreateMessageDetailed
+          (messageChannelId m)
+          ( def
+              { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
+                DR.messageDetailedContent = "I don't think " <> pkmn <> " is a Pokemon, but if it was, it would have the hidden ability " <> ha' <> "!",
+                DR.messageDetailedAllowedMentions = Nothing,
+                DR.messageDetailedEmbeds = (: []) <$> makeEmbed (ha', desc')
+              }
+          )
+    -- One species that has a HA
+    Right [(name, Just (ha', desc'))] ->
+      restCall_ $
+        DR.CreateMessageDetailed
+          (messageChannelId m)
+          ( def
+              { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
+                DR.messageDetailedContent = name <> "'s hidden ability is: " <> ha',
+                DR.messageDetailedAllowedMentions = Nothing,
+                DR.messageDetailedEmbeds = (: []) <$> makeEmbed (ha', desc')
+              }
+          )
+    -- One species with no HA
+    Right [(name, Nothing)] -> replyTo m Nothing $ name <> " has no hidden ability"
+    -- Multiple species
+    Right species -> do
       let makeText (name, Nothing) = name <> " has no hidden ability"
-          makeText (name, Just x) = name <> "'s hidden ability is: " <> x
-      replyTo m Nothing $ T.intercalate "\n" (map makeText ps)
+          makeText (name, Just (ha', _)) = name <> "'s hidden ability is: " <> ha'
+          messageText = T.intercalate "\n" (map makeText species)
+          uniqueHAs = nub $ mapMaybe snd species
+          embeds = mapMaybe makeEmbed uniqueHAs
+      restCall_ $
+        DR.CreateMessageDetailed
+          (messageChannelId m)
+          ( def
+              { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
+                DR.messageDetailedContent = messageText,
+                DR.messageDetailedAllowedMentions = Nothing,
+                DR.messageDetailedEmbeds = Just embeds
+              }
+          )
 
 makeThread :: Message -> App DiscordHandler ()
 makeThread m = do
