@@ -242,10 +242,12 @@ getEggGroups species =
       evolution <- resolve evolvesTo
       pure $ map name (psEggGroups evolution)
 
+isValidMove :: MoveFlavorText -> Bool
+isValidMove mft =
+  not ("this move is forgotten" `T.isInfixOf` mftFlavorText mft)
+
 isValidMoveInGame :: Game -> MoveFlavorText -> Bool
-isValidMoveInGame g mft =
-  name (mftVersionGroup mft) == gameToText g
-    && not ("This move can't be used" `T.isPrefixOf` mftFlavorText mft)
+isValidMoveInGame g mft = name (mftVersionGroup mft) == gameToText g && isValidMove mft
 
 getMoveFlavorText :: Game -> Move -> Text
 getMoveFlavorText game move =
@@ -261,7 +263,7 @@ getMoveFlavorText game move =
               x : _ -> mftFlavorText x
               [] -> case filter (isValidMoveInGame USUM) engFlavorTexts of
                 x : _ -> mftFlavorText x
-                [] -> case engFlavorTexts of
+                [] -> case filter isValidMove engFlavorTexts of
                   x : _ -> mftFlavorText x
                   [] -> "(no description found)"
    in T.unwords (T.lines ft')

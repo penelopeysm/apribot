@@ -85,6 +85,7 @@ eventHandler e = do
         then pure ()
         else do
           let msgText = T.strip (messageContent m)
+          when ("!help" == T.toLower msgText) (respondHelp m)
           when ("!em " `T.isPrefixOf` T.toLower msgText) (respondEM m)
           when ("!ha " `T.isPrefixOf` T.toLower msgText) (respondHA m)
           when ("!thread" `T.isPrefixOf` T.toLower msgText) (makeThread m)
@@ -215,7 +216,9 @@ respondEM m = do
               )
         -- No egg moves
         Right [] ->
-          replyTo m Nothing . T.pack $ printf "%s has no egg moves in %s" (speciesNameToRealName pkmn) game
+          if game == "BDSP"
+            then replyTo m Nothing . T.pack $ printf "Sorry! BDSP egg moves don't work (PokeAPI doesn't contain info on them). Try Serebii instead."
+            else replyTo m Nothing . T.pack $ printf "%s has no egg moves in %s" (speciesNameToRealName pkmn) game
         -- Egg moves
         Right ems' -> do
           let emText = T.pack $ printf "%s egg moves in %s: %s" (speciesNameToRealName pkmn) game (T.intercalate ", " (map emName ems'))
@@ -441,6 +444,19 @@ closeThread m = do
         _ -> replyTo m Nothing "Could not get the first message in the channel."
     Right _ ->
       pure ()
+
+respondHelp :: Message -> App DiscordHandler ()
+respondHelp m = do
+  replyTo m Nothing $
+    T.unlines
+      [ "**General commands**",
+        "- `!help`: Show this message.",
+        "- `!ha {pokemon}`: Show the hidden ability of a Pokémon",
+        "- `!em {game} {pokemon}`: Show egg moves for a Pokémon in a game. `{game}` can be `usum`, `swsh` or `sv`. If you use this command in a DM with the bot, it will also list potential parents.",
+        "**Trading commands**",
+        "- `!thread`: Reply to your trading partner in the trading forums with this to create a new thread in #thread-archive",
+        "- `!close`: Close your trading post, or a thread you created"
+      ]
 
 -- * Helper functions
 
