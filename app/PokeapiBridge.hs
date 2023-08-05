@@ -130,11 +130,27 @@ order (LevelUpParent _ o _) = o
 order (BreedParent _ o) = o
 order (BothParent _ o _) = o
 
-identifyParent :: Game -> Text -> [Text] -> Pokemon -> IO (Maybe Parent)
-identifyParent game moveName' eggGroupNames pkmn = do
+-- | Identify whether a given Pokemon is a compatible parent for a given egg
+-- move.
+identifyParent ::
+  -- | Game we are looking in
+  Game ->
+  -- | Name of the egg move
+  Text ->
+  -- | Names of the egg groups the potential baby is in
+  [Text] ->
+  -- | URL pointing to the evolution chain of the potential baby. We use the URL
+  -- here to save on having to make another API call
+  Text ->
+  -- | The prospective parent
+  Pokemon ->
+  -- | What type of parent the Pokemon is, if at all
+  IO (Maybe Parent)
+identifyParent game moveName' eggGroupNames ecUrl' pkmn = do
   species <- resolve (pokemonSpecies pkmn)
   speciesEggGroups <- getEggGroups species
-  if game /= SV && all (`notElem` eggGroupNames) speciesEggGroups
+  if (game /= SV && all (`notElem` eggGroupNames) speciesEggGroups) -- Wrong egg group
+    || (game /= SV && psGenderRate species == 8 && url (psEvolutionChain species) /= ecUrl') -- Female-only
     then pure Nothing
     else do
       let theMove = filter (\mv -> name (pmMove mv) == moveName') (pokemonMoves pkmn)
@@ -168,10 +184,10 @@ identifyParent game moveName' eggGroupNames pkmn = do
                 (Nothing, False) -> Nothing
         _ -> Nothing -- Move was found twice in the list, shouldn't happen
 
-getParents :: Game -> Move -> [Text] -> IO [Parent]
-getParents game mv eggGroupNames = do
+getParents :: Game -> Move -> [Text] -> Text -> IO [Parent]
+getParents game mv eggGroupNames ecUrl' = do
   learners <- mapConcurrently resolve (moveLearnedByPokemon mv)
-  parents <- mapConcurrently (identifyParent game (moveName mv) eggGroupNames) learners
+  parents <- mapConcurrently (identifyParent game (moveName mv) eggGroupNames ecUrl') learners
   pure $ catMaybes parents
 
 getMoveEnglishName :: Move -> Maybe Text
@@ -261,7 +277,7 @@ em game pkmn = do
       mkEggMove m = do
         case getMoveEnglishName m of
           Just engName -> do
-            parents <- getParents game m eggGroupNames
+            parents <- getParents game m eggGroupNames (url (psEvolutionChain species))
             let flavorText = getMoveFlavorText game m
             pure $ Just $ EggMove engName flavorText parents
           Nothing -> pure Nothing
