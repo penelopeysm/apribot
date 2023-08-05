@@ -175,7 +175,7 @@ respondEM m = do
   result <- case msgWords of
     "!em" : "usum" : rest -> do
       let pkmn = T.intercalate "-" rest
-      ems <- liftIO $ try $ em SwSh pkmn
+      ems <- liftIO $ try $ em USUM pkmn
       pure $ Right (pkmn, "USUM" :: T.Text, ems)
     "!em" : "swsh" : rest -> do
       let pkmn = T.intercalate "-" rest
@@ -189,7 +189,7 @@ respondEM m = do
       let pkmn = T.intercalate "-" rest
       ems <- liftIO $ try $ em SV pkmn
       pure $ Right (pkmn, "SV", ems)
-    _ -> pure $ Left "usage: `!em game pokemon` (game is swsh, bdsp, or sv). e.g. `!em swsh togepi`"
+    _ -> pure $ Left "usage: `!em game pokemon` (game is usum, swsh, or sv). e.g. `!em swsh togepi`. BDSP egg moves aren't available right now, sorry!"
   case result of
     Left err -> replyTo m Nothing err
     Right (pkmn, game, ems) -> do
