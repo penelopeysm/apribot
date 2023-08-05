@@ -11,7 +11,7 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Data.Text.Lazy (fromStrict)
 import qualified Data.Text.Lazy as TL
-import Data.Time.Clock (secondsToDiffTime, getCurrentTime)
+import Data.Time.Clock (getCurrentTime, secondsToDiffTime)
 import Database
 import Database.SQLite.Simple
 import DiscordBot (notifyDiscord)
@@ -60,8 +60,8 @@ retrieveRedditEnv = do
               lift $ atomically $ T.putStrLn "refreshing token"
               liftIO $ withConnection tokensSql $ updateToken sessionId rt
               Just <$> liftIO (mkEnvFromToken rt userAgent)
-              -- If it's still valid, create a new redditEnv from this token
-            else Just <$> liftIO (mkEnvFromToken t userAgent)
+            else -- If it's still valid, create a new redditEnv from this token
+              Just <$> liftIO (mkEnvFromToken t userAgent)
 
 -- | Make a new RedditEnv by requesting a token. This is to be used on the
 -- redirect URI and assumes that the user has been redirected to here after
@@ -98,7 +98,7 @@ makeNewRedditEnv = do
       let sessionCookie = SC.makeSimpleCookie tokenCookieName sessionId
       SC.setCookie $
         sessionCookie
-          { C.setCookieMaxAge = Just $ secondsToDiffTime $ 2 * 60 * 60 * 24 * 365,  -- 2 years
+          { C.setCookieMaxAge = Just $ secondsToDiffTime $ 2 * 60 * 60 * 24 * 365, -- 2 years
             C.setCookieHttpOnly = True,
             C.setCookieSameSite = Just C.sameSiteLax,
             C.setCookieSecure = True
@@ -535,8 +535,9 @@ web = do
             else do
               liftIO $ withConnection postsSql $ addVote postId voter vote
               hit <- liftIO $ withConnection postsSql $ wasHit postId
-              lift $ atomically $ T.putStrLn ("Notifying about mislabelled post " <> postId)
-              when (hit == 0 && vote == 1) (lift $ notifyDiscord (NotifyPostById (PostID postId)))
+              when (hit == 0 && vote == 1) $ do
+                lift $ atomically $ T.putStrLn ("Notifying about mislabelled post " <> postId)
+                lift $ notifyDiscord (NotifyPostById (PostID postId))
               ST.redirect "/contribute"
         _ -> ST.redirect "/contrib_error"
 
