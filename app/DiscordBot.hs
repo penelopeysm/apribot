@@ -166,6 +166,10 @@ createEmEmbedDescription em' =
 
 respondEM :: Message -> App DiscordHandler ()
 respondEM m = do
+  channel <- lift $ restCall $ DR.GetChannel (messageChannelId m)
+  let isDm = case channel of
+        Right (ChannelDirectMessage {}) -> True
+        _ -> False
   let msgWords = T.words . T.toLower . T.strip $ messageContent m
   result <- case msgWords of
     "!em" : "usum" : rest -> do
@@ -189,6 +193,7 @@ respondEM m = do
     Left err -> replyTo m Nothing err
     Right (pkmn, game, ems) -> do
       case ems of
+        -- Not a Pokemon
         Left (_ :: PokeException) -> do
           moveDescs <- liftIO randomMoves
           let messageText = "I don't think " <> pkmn <> " is a Pokemon, but if it was, it would have the egg moves: " <> T.intercalate ", " (map fst moveDescs) <> "!"
@@ -208,15 +213,26 @@ respondEM m = do
                     DR.messageDetailedEmbeds = Just [embed]
                   }
               )
+        -- No egg moves
         Right [] ->
           replyTo m Nothing . T.pack $ printf "%s has no egg moves in %s" pkmn game
+        -- Egg moves
         Right ems' -> do
-          let messageText = T.pack $ printf "%s egg moves in %s: %s" pkmn game (T.intercalate ", " (map emName ems'))
-          let makeEmEmbed :: EggMove -> CreateEmbed
-              makeEmEmbed em' =
+          let emText = T.pack $ printf "%s egg moves in %s: %s" pkmn game (T.intercalate ", " (map emName ems'))
+          let messageText =
+                if isDm then emText
+                  else emText <> "\nFor full details about compatible parents, use this command in a DM with me!"
+          let makeEmEmbedWithParents :: EggMove -> CreateEmbed
+              makeEmEmbedWithParents em' =
                 def
                   { createEmbedTitle = emName em',
                     createEmbedDescription = createEmEmbedDescription em',
+                    createEmbedColor = Just DiscordColorLuminousVividPink
+                  }
+          let emEmbedShort =
+                def
+                  { createEmbedTitle = "Descriptions",
+                    createEmbedDescription = T.intercalate "\n" (map (\e -> "**" <> emName e <> "**: " <> emFlavorText e) ems'),
                     createEmbedColor = Just DiscordColorLuminousVividPink
                   }
           restCall_ $
@@ -226,7 +242,10 @@ respondEM m = do
                   { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
                     DR.messageDetailedContent = messageText,
                     DR.messageDetailedAllowedMentions = Nothing,
-                    DR.messageDetailedEmbeds = Just (map makeEmEmbed ems')
+                    DR.messageDetailedEmbeds =
+                      if isDm
+                        then Just (map makeEmEmbedWithParents ems')
+                        else Just [emEmbedShort]
                   }
               )
 
