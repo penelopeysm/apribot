@@ -161,8 +161,8 @@ createEmEmbedDescription em' =
           )
           parents of
           [] -> []
-          xs -> ["**Parents which learn by breeding**\n" <> T.intercalate ", " xs]
-   in T.intercalate "\n\n" (levelUpParents <> breedParents)
+          xs -> ["**Parents which learn by breeding**\n" <> T.intercalate ", " xs <> " (and evolutions)"]
+   in T.intercalate "\n\n" (emFlavorText em' : levelUpParents <> breedParents)
 
 respondEM :: Message -> App DiscordHandler ()
 respondEM m = do
@@ -190,8 +190,24 @@ respondEM m = do
     Right (pkmn, game, ems) -> do
       case ems of
         Left (_ :: PokeException) -> do
-          moves <- liftIO randomMoves
-          replyTo m Nothing $ "I don't think " <> pkmn <> " is a Pokemon, but if it was, it would have the egg moves: " <> T.intercalate ", " moves <> "!"
+          moveDescs <- liftIO randomMoves
+          let messageText = "I don't think " <> pkmn <> " is a Pokemon, but if it was, it would have the egg moves: " <> T.intercalate ", " (map fst moveDescs) <> "!"
+          let embed =
+                def
+                  { createEmbedTitle = "Descriptions",
+                    createEmbedDescription = T.intercalate "\n" (map (\(m', d') -> "**" <> m' <> "**: " <> d') moveDescs),
+                    createEmbedColor = Just DiscordColorLuminousVividPink
+                  }
+          restCall_ $
+            DR.CreateMessageDetailed
+              (messageChannelId m)
+              ( def
+                  { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
+                    DR.messageDetailedContent = messageText,
+                    DR.messageDetailedAllowedMentions = Nothing,
+                    DR.messageDetailedEmbeds = Just [embed]
+                  }
+              )
         Right [] ->
           replyTo m Nothing . T.pack $ printf "%s has no egg moves in %s" pkmn game
         Right ems' -> do

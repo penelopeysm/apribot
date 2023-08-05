@@ -181,17 +181,26 @@ getMoveEnglishName move =
         [] -> Nothing
         (n : _) -> Just (nameName n)
 
-randomMoves :: IO [Text]
+randomMoves :: IO [(Text, Text)]
 randomMoves = do
   allMoves <- gets @Move (Just 100000) Nothing
   numberOfMoves :: Int <- randomRIO (2, 6)
   -- randomly generate that number of moves
   moveIndices :: [Int] <- replicateM numberOfMoves (randomRIO (0, length allMoves - 1))
   moves <- mapConcurrently (\i -> resolve (allMoves !! i)) moveIndices
-  pure $ sort $ mapMaybe getMoveEnglishName moves
+  pure $
+    sort $
+      mapMaybe
+        ( \m ->
+            case getMoveEnglishName m of
+              Nothing -> Nothing
+              Just enName -> Just (enName, getMoveFlavorText SV m)
+        )
+        moves
 
 data EggMove = EggMove
   { emName :: Text,
+    emFlavorText :: Text,
     emParents :: [Parent]
   }
   deriving (Eq, Ord, Show)
@@ -216,6 +225,30 @@ getEggGroups species =
       evolution <- resolve evolvesTo
       pure $ map name (psEggGroups evolution)
 
+isValidMoveInGame :: Game -> MoveFlavorText -> Bool
+isValidMoveInGame g mft =
+  name (mftVersionGroup mft) == gameToText g
+    && not ("This move can't be used" `T.isPrefixOf` mftFlavorText mft)
+
+getMoveFlavorText :: Game -> Move -> Text
+getMoveFlavorText game move =
+  -- We try to get the game we're using > SV > SwSh > BDSP > USUM, then fallback to whatever we can find
+  let engFlavorTexts = filter ((== "en") . name . mftLanguage) (moveFlavorTextEntries move)
+      ft' = case filter (isValidMoveInGame game) engFlavorTexts of
+        x : _ -> mftFlavorText x
+        [] -> case filter (isValidMoveInGame SV) engFlavorTexts of
+          x : _ -> mftFlavorText x
+          [] -> case filter (isValidMoveInGame SwSh) engFlavorTexts of
+            x : _ -> mftFlavorText x
+            [] -> case filter (isValidMoveInGame BDSP) engFlavorTexts of
+              x : _ -> mftFlavorText x
+              [] -> case filter (isValidMoveInGame USUM) engFlavorTexts of
+                x : _ -> mftFlavorText x
+                [] -> case engFlavorTexts of
+                  x : _ -> mftFlavorText x
+                  [] -> "(no description found)"
+   in T.unwords (T.lines ft')
+
 em :: Game -> Text -> IO [EggMove]
 em game pkmn = do
   poke <- get @Pokemon pkmn
@@ -229,7 +262,8 @@ em game pkmn = do
         case getMoveEnglishName m of
           Just engName -> do
             parents <- getParents game m eggGroupNames
-            pure $ Just $ EggMove engName parents
+            let flavorText = getMoveFlavorText game m
+            pure $ Just $ EggMove engName flavorText parents
           Nothing -> pure Nothing
   ems <- mapM mkEggMove actualMoves
   pure $ sort $ catMaybes ems
