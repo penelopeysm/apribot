@@ -9,6 +9,7 @@ module PokeapiBridge
     Parent (..),
     order,
     EggMove (..),
+    speciesNameToRealName,
   )
 where
 
@@ -283,3 +284,23 @@ em game pkmn = do
           Nothing -> pure Nothing
   ems <- mapM mkEggMove actualMoves
   pure $ sort $ catMaybes ems
+
+-- * General
+
+capitaliseFirst :: Text -> Text
+capitaliseFirst t = T.toUpper (T.take 1 t) <> T.drop 1 t
+
+speciesNameToRealName :: Text -> Text
+speciesNameToRealName t =
+  case t of
+    "jangmo-o" -> "Jangmo-o"
+    t' ->
+      T.intercalate "-"
+        . map capitaliseFirst
+        . T.splitOn "-"
+        . T.replace "farfetchd" "farfetch'd"
+        . T.replace "sirfetchd" "sirfetch'd"
+        . T.replace "mr-mime" "mr. Mime"
+        . T.replace "mr-rime" "mr. Rime"
+        . T.replace "flabebe" "flabébé"
+        $ t'

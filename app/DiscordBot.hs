@@ -146,8 +146,8 @@ createEmEmbedDescription em' =
       levelUpParents =
         case mapMaybe
           ( \case
-              LevelUpParent nm _ lvl -> Just $ nm <> " (" <> tshow lvl <> ")"
-              BothParent nm _ lvl -> Just $ nm <> " (" <> tshow lvl <> ")"
+              LevelUpParent nm _ lvl -> Just $ speciesNameToRealName nm <> " (" <> tshow lvl <> ")"
+              BothParent nm _ lvl -> Just $ speciesNameToRealName nm <> " (" <> tshow lvl <> ")"
               BreedParent {} -> Nothing
           )
           parents of
@@ -156,7 +156,7 @@ createEmEmbedDescription em' =
       breedParents =
         case mapMaybe
           ( \case
-              BreedParent nm _ -> Just nm
+              BreedParent nm _ -> Just $ speciesNameToRealName nm
               _ -> Nothing
           )
           parents of
@@ -215,12 +215,13 @@ respondEM m = do
               )
         -- No egg moves
         Right [] ->
-          replyTo m Nothing . T.pack $ printf "%s has no egg moves in %s" pkmn game
+          replyTo m Nothing . T.pack $ printf "%s has no egg moves in %s" (speciesNameToRealName pkmn) game
         -- Egg moves
         Right ems' -> do
-          let emText = T.pack $ printf "%s egg moves in %s: %s" pkmn game (T.intercalate ", " (map emName ems'))
+          let emText = T.pack $ printf "%s egg moves in %s: %s" (speciesNameToRealName pkmn) game (T.intercalate ", " (map emName ems'))
           let messageText =
-                if isDm then emText
+                if isDm
+                  then emText
                   else emText <> "\nFor full details about compatible parents, use this command in a DM with me!"
           let makeEmEmbedWithParents :: EggMove -> CreateEmbed
               makeEmEmbedWithParents em' =
@@ -290,7 +291,7 @@ respondHA m = do
           (messageChannelId m)
           ( def
               { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
-                DR.messageDetailedContent = name <> "'s hidden ability is: " <> ha',
+                DR.messageDetailedContent = speciesNameToRealName name <> "'s hidden ability is: " <> ha',
                 DR.messageDetailedAllowedMentions = Nothing,
                 DR.messageDetailedEmbeds = (: []) <$> makeEmbed (ha', desc')
               }
@@ -299,8 +300,8 @@ respondHA m = do
     Right [(name, Nothing)] -> replyTo m Nothing $ name <> " has no hidden ability"
     -- Multiple species
     Right species -> do
-      let makeText (name, Nothing) = name <> " has no hidden ability"
-          makeText (name, Just (ha', _)) = name <> "'s hidden ability is: " <> ha'
+      let makeText (name, Nothing) = speciesNameToRealName name <> " has no hidden ability"
+          makeText (name, Just (ha', _)) = speciesNameToRealName name <> "'s hidden ability is: " <> ha'
           messageText = T.intercalate "\n" (map makeText species)
           uniqueHAs = nub $ mapMaybe snd species
           embeds = mapMaybe makeEmbed uniqueHAs
