@@ -1,3 +1,5 @@
+{-# LANGUAGE LambdaCase #-}
+
 -- | Discord bot.
 --
 -- Note that we should actually like to implement a transformer stack like
@@ -15,7 +17,7 @@ module DiscordBot (notifyDiscord, discordBot) where
 import Control.Concurrent (forkIO)
 import Control.Concurrent.Chan (readChan, writeChan)
 import Control.Exception (try)
-import Data.List (nub)
+import Data.List (nub, sortOn)
 import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -70,14 +72,23 @@ startup = do
 --    future.
 eventHandler :: Event -> App DiscordHandler ()
 eventHandler e = do
-  atomically $ print e >> putStrLn "" >> putStrLn ""
+  -- Print if it's not a GuildCreate
   case e of
+    GuildCreate {} -> pure ()
+    _ -> atomically $ print e >> putStrLn "" >> putStrLn ""
+  case e of
+    GuildCreate {} -> pure ()
     MessageCreate m -> do
-      let msgText = T.strip (messageContent m)
-      when ("!em " `T.isPrefixOf` T.toLower msgText) (respondEM m)
-      when ("!ha " `T.isPrefixOf` T.toLower msgText) (respondHA m)
-      when ("!thread" `T.isPrefixOf` T.toLower msgText) (makeThread m)
-      when (any (`T.isPrefixOf` T.toLower msgText) ["!close", "[close]"]) (closeThread m)
+      cfg <- ask
+      -- If running locally, ignore messages from other users
+      if not (cfgOnFly cfg) && userId (messageAuthor m) /= 236863453443260419
+        then pure ()
+        else do
+          let msgText = T.strip (messageContent m)
+          when ("!em " `T.isPrefixOf` T.toLower msgText) (respondEM m)
+          when ("!ha " `T.isPrefixOf` T.toLower msgText) (respondHA m)
+          when ("!thread" `T.isPrefixOf` T.toLower msgText) (makeThread m)
+          when (any (`T.isPrefixOf` T.toLower msgText) ["!close", "[close]"]) (closeThread m)
     -- Ignore other events (for now)
     _ -> pure ()
 
@@ -129,6 +140,30 @@ notifyLoop = do
       NotifyPost post -> do
         notifyPost post
 
+createEmEmbedDescription :: EggMove -> Text
+createEmEmbedDescription em' =
+  let parents = sortOn order (emParents em')
+      levelUpParents =
+        case mapMaybe
+          ( \case
+              LevelUpParent nm _ lvl -> Just $ nm <> " (" <> tshow lvl <> ")"
+              BothParent nm _ lvl -> Just $ nm <> " (" <> tshow lvl <> ")"
+              BreedParent {} -> Nothing
+          )
+          parents of
+          [] -> []
+          xs -> ["**Parents which learn by level up**\n" <> T.intercalate ", " xs]
+      breedParents =
+        case mapMaybe
+          ( \case
+              BreedParent nm _ -> Just nm
+              _ -> Nothing
+          )
+          parents of
+          [] -> []
+          xs -> ["**Parents which learn by breeding**\n" <> T.intercalate ", " xs]
+   in T.intercalate "\n\n" (levelUpParents <> breedParents)
+
 respondEM :: Message -> App DiscordHandler ()
 respondEM m = do
   let msgWords = T.words . T.toLower . T.strip $ messageContent m
@@ -159,8 +194,25 @@ respondEM m = do
           replyTo m Nothing $ "I don't think " <> pkmn <> " is a Pokemon, but if it was, it would have the egg moves: " <> T.intercalate ", " moves <> "!"
         Right [] ->
           replyTo m Nothing . T.pack $ printf "%s has no egg moves in %s" pkmn game
-        Right ems' ->
-          replyTo m Nothing . T.pack $ printf "%s egg moves in %s: %s" pkmn game (T.intercalate ", " ems')
+        Right ems' -> do
+          let messageText = T.pack $ printf "%s egg moves in %s: %s" pkmn game (T.intercalate ", " (map emName ems'))
+          let makeEmEmbed :: EggMove -> CreateEmbed
+              makeEmEmbed em' =
+                def
+                  { createEmbedTitle = emName em',
+                    createEmbedDescription = createEmEmbedDescription em',
+                    createEmbedColor = Just DiscordColorLuminousVividPink
+                  }
+          restCall_ $
+            DR.CreateMessageDetailed
+              (messageChannelId m)
+              ( def
+                  { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
+                    DR.messageDetailedContent = messageText,
+                    DR.messageDetailedAllowedMentions = Nothing,
+                    DR.messageDetailedEmbeds = Just (map makeEmEmbed ems')
+                  }
+              )
 
 respondHA :: Message -> App DiscordHandler ()
 respondHA m = do
@@ -181,11 +233,7 @@ respondHA m = do
                       <> "_(Ability)",
                   createEmbedColor = Just DiscordColorLuminousVividPink
                 }
-  haDetails <- atomically $ do
-    print pkmn
-    ha <- liftIO $ try $ haSpecies (T.intercalate "-" . T.words $ pkmn)
-    print ha
-    pure ha
+  haDetails <- atomically $ liftIO $ try $ ha (T.intercalate "-" . T.words $ pkmn)
   case haDetails of
     -- Not a Pokemon
     Left (_ :: PokeException) -> do

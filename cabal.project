@@ -8,7 +8,7 @@ source-repository-package
 source-repository-package
     type: git
     location: https://github.com/penelopeysm/pokeapi
-    tag: d8ebc2092caf65778ec3fd587fbf4ae7fc248f20
+    tag: 01912467ac01740482a6543acf4948eb6f5b0f9b
 
 source-repository-package
     type: git

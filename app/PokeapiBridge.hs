@@ -1,12 +1,22 @@
 {-# LANGUAGE TypeApplications #-}
 
-module PokeapiBridge (haSpecies, randomAbility, Game (..), randomMoves, em) where
+module PokeapiBridge
+  ( ha,
+    randomAbility,
+    Game (..),
+    em,
+    randomMoves,
+    Parent (..),
+    order,
+    EggMove (..),
+  )
+where
 
 import Control.Concurrent.Async (mapConcurrently)
-import Control.Exception (throwIO)
-import Control.Monad (replicateM)
+import Control.Exception (throwIO, try)
+import Control.Monad (forM, replicateM)
 import Data.List (partition, sort)
-import Data.Maybe (mapMaybe)
+import Data.Maybe (catMaybes, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Pokeapi
@@ -27,13 +37,13 @@ randomAbility = do
   abty <- get (T.pack $ show abId)
   pure (getAbilityEngName abty, getAbilityDescription abty)
 
--- | Get a list of all possible abilities of a Pokemon. The Bool indicates
+-- | Get a list of all possible abili$ties of a Pokemon. The Bool indicates
 -- whether the ability is a hidden ability (True corresponds to a HA).
-getAbilitiesAndHidden :: Text -> IO [(Ability, Bool)]
-getAbilitiesAndHidden p = do
-  pAbilities <- pokemonAbilities <$> get p
+getAbilitiesAndHidden :: Pokemon -> IO [(Ability, Bool)]
+getAbilitiesAndHidden pkmn = do
+  let pAbilities = pokemonAbilities pkmn
   case pAbilities of
-    [] -> throwIO $ PokeException $ "No abilities found for Pokemon '" <> p <> "'. (This should not happen.)"
+    [] -> throwIO $ PokeException $ "No abilities found for Pokemon '" <> pokemonName pkmn <> "'. (This should not happen.)"
     _ -> do
       abilities <- mapConcurrently (resolve . paAbility) pAbilities
       let hiddens = map paIsHidden pAbilities
@@ -63,9 +73,9 @@ getAbilityEngName abty =
         (n : _) -> nameName n
 
 -- | Get the hidden ability of a Pokemon, if it exists.
-ha :: Text -> IO (Maybe (Text, Text))
-ha p = do
-  abilities' <- getAbilitiesAndHidden p
+haPokemon :: Pokemon -> IO (Maybe (Text, Text))
+haPokemon pkmn = do
+  abilities' <- getAbilitiesAndHidden pkmn
   let (ha', na') = partition snd abilities'
   case ha' of
     [] -> pure Nothing
@@ -76,57 +86,93 @@ ha p = do
       if abilityName a `elem` map (abilityName . fst) na'
         then pure Nothing
         else pure $ Just (getAbilityEngName a, getAbilityDescription a)
-    _ -> terror $ "Multiple hidden abilities found for Pokemon " <> p <> ": " <> tshow ha' <> "."
+    _ -> terror $ "Multiple hidden abilities found for Pokemon " <> pokemonName pkmn <> ": " <> tshow ha' <> "."
 
-haSpecies :: Text -> IO [(Text, Maybe (Text, Text))]
-haSpecies ps = do
-  species <- get ps
-  case psVarieties species of
-    [] -> terror $ "No varieties found for Pokemon species '" <> ps <> "'."
-    [var] -> do
-      let name' = name (psvPokemon var)
-      ha' <- ha name'
-      pure [(name', ha')]
-    vars ->
-      mapM
-        ( \var -> do
-            let name' = name (psvPokemon var)
-            ha' <- ha name'
-            pure (name', ha')
-        )
-        vars
+haSpecies :: PokemonSpecies -> IO [(Text, Maybe (Text, Text))]
+haSpecies species = do
+  forM (psVarieties species) $ \var -> do
+    pkmn <- resolve (psvPokemon var)
+    ha' <- haPokemon pkmn
+    pure (name (psvPokemon var), ha')
+
+-- | Get the hidden ability of a Pokemon. First try to resolve it as a Pokemon.
+-- If that fails, try to resolve it as a PokemonSpecies.
+ha :: Text -> IO [(Text, Maybe (Text, Text))]
+ha nm = do
+  pkmn <- try $ get @Pokemon nm
+  case pkmn of
+    Right p -> do
+      haDesc <- haPokemon p
+      pure [(pokemonName p, haDesc)]
+    Left (_ :: PokeException) -> do
+      -- No need to catch here, let exceptions bubble up
+      species <- get @PokemonSpecies nm
+      haSpecies species
 
 -- * Egg moves
 
-data Game = USUM | SwSh | BDSP | SV
-
-data LevelUpParent = LUP {lupName :: Text, lupLevel :: Int}
-
-newtype BreedParent = BP {bpName :: Text}
-
-data EggMove = EM {emName :: Text, levelParents :: [LevelUpParent], breedParents :: [BreedParent]}
-
--- getLevelUpParents :: Game -> Text -> IO [LevelUpParent]
--- getLevelUpParents game move = do
---   move' <- get move
---   let lup = moveLevelUpLearnMove move'
---   case lup of
---     Nothing -> pure []
---     Just lup' -> do
---       let lup'' = filter (\l -> name (lupVersionGroup l) == gameToText game) lup'
---       mapM
---         ( \l -> do
---             let lupName' = name (lupMove l)
---             lupLevel' <- get (name (lupMove l))
---             pure $ LUP lupName' (lupLevel l)
---         )
---         lup''
+data Game = USUM | SwSh | BDSP | SV deriving (Eq, Ord, Show)
 
 gameToText :: Game -> Text
 gameToText USUM = "ultra-sun-ultra-moon"
 gameToText SwSh = "sword-shield"
 gameToText BDSP = "brilliant-diamond-shining-pearl"
 gameToText SV = "scarlet-violet"
+
+data Parent
+  = LevelUpParent {lupPkmnName :: Text, lupOrder :: Int, lupLevel :: Int}
+  | BreedParent {bpPkmnName :: Text, bpOrder :: Int}
+  | BothParent {bothPkmnName :: Text, bothOrder :: Int, bothLevel :: Int}
+  deriving (Eq, Ord, Show)
+
+order :: Parent -> Int
+order (LevelUpParent _ o _) = o
+order (BreedParent _ o) = o
+order (BothParent _ o _) = o
+
+identifyParent :: Game -> Text -> [Text] -> Pokemon -> IO (Maybe Parent)
+identifyParent game moveName' eggGroupNames pkmn = do
+  species <- resolve (pokemonSpecies pkmn)
+  speciesEggGroups <- getEggGroups species
+  if game /= SV && all (`notElem` eggGroupNames) speciesEggGroups
+    then pure Nothing
+    else do
+      let theMove = filter (\mv -> name (pmMove mv) == moveName') (pokemonMoves pkmn)
+          name' = pokemonName pkmn
+          order' = pokemonOrder pkmn
+      pure $ case theMove of
+        [] -> Nothing -- Pokemon does not learn this move
+        [mv] ->
+          -- check if it learns via level up
+          let vgd = pmVersionGroupDetails mv
+              maybeLevelUpLevel = case filter
+                ( \pmv ->
+                    name (pmvMoveLearnMethod pmv) == "level-up"
+                      && name (pmvVersionGroup pmv) == gameToText game
+                )
+                vgd of
+                [pmv] -> Just (pmvLevelLearnedAt pmv)
+                _ -> Nothing
+              isBreedParent = case filter
+                ( \pmv ->
+                    name (pmvMoveLearnMethod pmv) == "egg"
+                      && name (pmvVersionGroup pmv) == gameToText game
+                )
+                vgd of
+                [_] -> True
+                _ -> False
+           in case (maybeLevelUpLevel, isBreedParent) of
+                (Just lvl, False) -> Just $ LevelUpParent name' order' lvl
+                (Nothing, True) -> Just $ BreedParent name' order'
+                (Just lvl, True) -> Just $ BothParent name' order' lvl
+                (Nothing, False) -> Nothing
+        _ -> Nothing -- Move was found twice in the list, shouldn't happen
+
+getParents :: Game -> Move -> [Text] -> IO [Parent]
+getParents game mv eggGroupNames = do
+  learners <- mapConcurrently resolve (moveLearnedByPokemon mv)
+  parents <- mapConcurrently (identifyParent game (moveName mv) eggGroupNames) learners
+  pure $ catMaybes parents
 
 getMoveEnglishName :: Move -> Maybe Text
 getMoveEnglishName move =
@@ -144,6 +190,12 @@ randomMoves = do
   moves <- mapConcurrently (\i -> resolve (allMoves !! i)) moveIndices
   pure $ sort $ mapMaybe getMoveEnglishName moves
 
+data EggMove = EggMove
+  { emName :: Text,
+    emParents :: [Parent]
+  }
+  deriving (Eq, Ord, Show)
+
 isEggMove :: Game -> PokemonMove -> Bool
 isEggMove game m =
   let vgDetails = pmVersionGroupDetails m
@@ -154,9 +206,30 @@ isEggMove game m =
         )
         vgDetails
 
-em :: Game -> Text -> IO [Text]
+getEggGroups :: PokemonSpecies -> IO [Text]
+getEggGroups species =
+  if not (psIsBaby species)
+    then pure $ map name (psEggGroups species)
+    else do
+      chain <- resolve (psEvolutionChain species)
+      let evolvesTo = clSpecies . head . clEvolvesTo . ecChain $ chain
+      evolution <- resolve evolvesTo
+      pure $ map name (psEggGroups evolution)
+
+em :: Game -> Text -> IO [EggMove]
 em game pkmn = do
-  moves <- pokemonMoves <$> get pkmn
+  poke <- get @Pokemon pkmn
+  let moves = pokemonMoves poke
+  species <- resolve (pokemonSpecies poke)
+  eggGroupNames <- getEggGroups species
   let moves' = filter (isEggMove game) moves
   actualMoves <- mapM (resolve . pmMove) moves'
-  pure $ sort $ mapMaybe getMoveEnglishName actualMoves
+  let mkEggMove :: Move -> IO (Maybe EggMove)
+      mkEggMove m = do
+        case getMoveEnglishName m of
+          Just engName -> do
+            parents <- getParents game m eggGroupNames
+            pure $ Just $ EggMove engName parents
+          Nothing -> pure Nothing
+  ems <- mapM mkEggMove actualMoves
+  pure $ sort $ catMaybes ems
