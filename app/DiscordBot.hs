@@ -335,8 +335,8 @@ makeThread m = do
             Right repliedMsg -> do
               let authorId1 = userId (messageAuthor m)
                   authorId2 = userId (messageAuthor repliedMsg)
-              author1 <- getUserNick (messageGuildId m) (messageAuthor m)
-              author2 <- getUserNick (messageGuildId m) (messageAuthor repliedMsg)
+                  author1 = getUserNick m
+                  author2 = getUserNick repliedMsg
               eitherFirstMsg <- lift $ restCall $ DR.GetChannelMessages rcid (1, DR.AfterMessage 0)
               case eitherFirstMsg of
                 Left errr' -> do
@@ -551,15 +551,9 @@ mentionOnly userIds =
     }
 
 -- | Attempt to get user's server nickname. Falls back to global username.
-getUserNick :: Maybe GuildId -> User -> App DiscordHandler T.Text
-getUserNick mbGuildId user = do
-  let fallback = userName user
-  case mbGuildId of
-    Nothing -> pure fallback
-    Just guildId -> do
-      eitherMember <- lift $ restCall $ DR.GetGuildMember guildId (userId user)
-      case eitherMember of
-        Left _ -> pure fallback
-        Right member -> case memberNick member of
-          Nothing -> pure fallback
-          Just nick -> pure nick
+getUserNick :: Message -> T.Text
+getUserNick m =
+  let fallback = userName (messageAuthor m)
+   in case messageMember m of
+        Nothing -> fallback
+        Just guildMember -> fromMaybe fallback (memberNick guildMember)
