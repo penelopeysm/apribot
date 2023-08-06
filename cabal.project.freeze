@@ -245,4 +245,4 @@ constraints: any.Cabal ==3.6.3.0,
              any.xss-sanitize ==0.3.7.2,
              any.zlib ==0.6.3.0,
              zlib -bundled-c-zlib -non-blocking-ffi -pkg-config
-index-state: hackage.haskell.org 2023-08-01T22:46:02Z
+index-state: hackage.haskell.org 2023-08-05T23:52:04Z
