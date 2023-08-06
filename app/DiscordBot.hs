@@ -189,7 +189,7 @@ respondEM m = do
       let pkmn = T.intercalate "-" rest
       ems <- liftIO $ try $ em SV pkmn
       pure $ Right (pkmn, "SV", ems)
-    _ -> pure $ Left "usage: `!em game pokemon` (game is usum, swsh, or sv). e.g. `!em swsh togepi`. BDSP egg moves aren't available right now, sorry!"
+    _ -> pure $ Left "usage: `!em game pokemon` (game is usum, swsh, or sv). e.g. `!em swsh togepi`"
   case result of
     Left err -> replyTo m Nothing err
     Right (pkmn, game, ems) -> do
@@ -216,16 +216,14 @@ respondEM m = do
               )
         -- No egg moves
         Right [] ->
-          if game == "BDSP"
-            then replyTo m Nothing . T.pack $ printf "Sorry! BDSP egg moves don't work (PokeAPI doesn't contain info on them). Try Serebii instead."
-            else replyTo m Nothing . T.pack $ printf "%s has no egg moves in %s" (speciesNameToRealName pkmn) game
+          replyTo m Nothing . T.pack $ printf "%s has no egg moves in %s" (speciesNameToRealName pkmn) game
         -- Egg moves
         Right ems' -> do
           let emText = T.pack $ printf "%s egg moves in %s: %s" (speciesNameToRealName pkmn) game (T.intercalate ", " (map emName ems'))
-          let messageText =
-                if isDm
-                  then emText
-                  else emText <> "\nFor full details about compatible parents, use this command in a DM with me!"
+          let messageText
+                | isDm && game /= "BDSP" = emText
+                | isDm = emText <> "\n\nDetails about BDSP parents aren't available right now (because PokeAPI doesn't provide this info). Please use Serebii or PokemonDB. Sorry!"
+                | otherwise = emText <> "\n\nFor full details about compatible parents, use this command in a DM with me!"
           let makeEmEmbedWithParents :: EggMove -> CreateEmbed
               makeEmEmbedWithParents em' =
                 def
@@ -240,6 +238,7 @@ respondEM m = do
                     createEmbedColor = Just DiscordColorLuminousVividPink
                   }
           restCall_ $
+            -- TODO: use separate embeds when there are more than 10 egg moves
             DR.CreateMessageDetailed
               (messageChannelId m)
               ( def
@@ -247,8 +246,8 @@ respondEM m = do
                     DR.messageDetailedContent = messageText,
                     DR.messageDetailedAllowedMentions = Nothing,
                     DR.messageDetailedEmbeds =
-                      if isDm
-                        then Just (map makeEmEmbedWithParents ems')
+                      if isDm && game /= "BDSP"
+                        then Just (take 10 $ map makeEmEmbedWithParents ems')
                         else Just [emEmbedShort]
                   }
               )

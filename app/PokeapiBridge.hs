@@ -21,7 +21,9 @@ import Data.List (partition, sort)
 import Data.Maybe (catMaybes, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Paths_apribot (getDataFileName)
 import Pokeapi
+import System.Process (readProcess)
 import System.Random (randomRIO)
 
 terror :: Text -> IO a
@@ -118,7 +120,7 @@ data Game = USUM | SwSh | BDSP | SV deriving (Eq, Ord, Show)
 gameToText :: Game -> Text
 gameToText USUM = "ultra-sun-ultra-moon"
 gameToText SwSh = "sword-shield"
-gameToText BDSP = "brilliant-diamond-shining-pearl"
+gameToText BDSP = "brilliant-diamond-and-shining-pearl"
 gameToText SV = "scarlet-violet"
 
 data Parent
@@ -271,22 +273,39 @@ getMoveFlavorText game move =
 
 em :: Game -> Text -> IO [EggMove]
 em game pkmn = do
-  poke <- get @Pokemon pkmn
-  let moves = pokemonMoves poke
-  species <- resolve (pokemonSpecies poke)
-  eggGroupNames <- getEggGroups species
-  let moves' = filter (isEggMove game) moves
-  actualMoves <- mapM (resolve . pmMove) moves'
-  let mkEggMove :: Move -> IO (Maybe EggMove)
-      mkEggMove m = do
-        case getMoveEnglishName m of
-          Just engName -> do
-            parents <- getParents game m eggGroupNames (url (psEvolutionChain species))
-            let flavorText = getMoveFlavorText game m
-            pure $ Just $ EggMove engName flavorText parents
-          Nothing -> pure Nothing
-  ems <- mapM mkEggMove actualMoves
-  pure $ sort $ catMaybes ems
+  eitherPoke <- try $ get @Pokemon pkmn
+  case eitherPoke of
+    Left (e :: PokeException) -> throwIO e
+    Right poke -> do
+      species <- resolve (pokemonSpecies poke)
+      eggGroupNames <- getEggGroups species
+      actualMoves <- case game of
+        -- PokeAPI doesn't have BDSP egg moves so we scrape from PokemonDB
+        -- instead (and pray that the moves come out with the same names as in
+        -- PokeAPI)
+        -- Hopefully this is temporary. The long term aim would be to add BDSP
+        -- egg moves to PokeAPI. I opened an issue:
+        -- https://github.com/PokeAPI/pokeapi/issues/914
+        BDSP -> do
+          bdspEmPath <- getDataFileName "python/bdsp_em.py"
+          bdspEms <- try $ readProcess bdspEmPath [T.unpack pkmn] ""
+          case bdspEms of
+            Left (_ :: IOError) -> throwIO $ PokeException "Failed to get BDSP egg moves"
+            Right ems -> mapM get (T.words . T.pack $ ems)
+        _ -> do
+          let moves = pokemonMoves poke
+          let moves' = filter (isEggMove game) moves
+          mapM (resolve . pmMove) moves'
+      let mkEggMove :: Move -> IO (Maybe EggMove)
+          mkEggMove m = do
+            case getMoveEnglishName m of
+              Just engName -> do
+                parents <- getParents game m eggGroupNames (url (psEvolutionChain species))
+                let flavorText = getMoveFlavorText game m
+                pure $ Just $ EggMove engName flavorText parents
+              Nothing -> pure Nothing
+      ems <- mapM mkEggMove actualMoves
+      pure $ sort $ catMaybes ems
 
 -- * General
 
