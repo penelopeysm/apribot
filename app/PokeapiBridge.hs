@@ -14,7 +14,8 @@ module PokeapiBridge
 where
 
 import Control.Concurrent.Async (mapConcurrently)
-import Control.Exception (throwIO, try)
+import Control.Concurrent.QSem
+import Control.Exception (bracket_, throwIO, try)
 import Control.Monad (forM, replicateM)
 import Data.List (partition, sort)
 import Data.Maybe (catMaybes, mapMaybe)
@@ -187,8 +188,8 @@ identifyParent game moveName' eggGroupNames ecUrl' pkmn = do
 
 getParents :: Game -> Move -> [Text] -> Text -> IO [Parent]
 getParents game mv eggGroupNames ecUrl' = do
-  learners <- mapConcurrently resolve (moveLearnedByPokemon mv)
-  parents <- mapConcurrently (identifyParent game (moveName mv) eggGroupNames ecUrl') learners
+  learners <- mapConcurrentlyLimited 30 resolve (moveLearnedByPokemon mv)
+  parents <- mapConcurrentlyLimited 30 (identifyParent game (moveName mv) eggGroupNames ecUrl') learners
   pure $ catMaybes parents
 
 getMoveEnglishName :: Move -> Maybe Text
@@ -306,3 +307,9 @@ speciesNameToRealName t =
         . T.replace "mr-rime" "mr. Rime"
         . T.replace "flabebe" "flabébé"
         $ t'
+
+-- | mapConcurrently but with only 50 actions at once.
+mapConcurrentlyLimited :: Int -> (a -> IO b) -> [a] -> IO [b]
+mapConcurrentlyLimited n f xs = do
+  sem <- newQSem n
+  mapConcurrently (bracket_ (waitQSem sem) (signalQSem sem) . f) xs
