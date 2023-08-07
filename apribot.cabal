@@ -84,6 +84,7 @@ executable apribot
                       cmark-gfm,
                       containers,
                       cookie,
+                      deepseq,
                       discord-haskell >= 1.15.5,
                       lucid,
                       mtl,

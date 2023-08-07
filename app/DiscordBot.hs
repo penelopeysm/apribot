@@ -221,8 +221,8 @@ respondEM m = do
         Right ems' -> do
           let emText = T.pack $ printf "%s egg moves in %s: %s" (speciesNameToRealName pkmn) game (T.intercalate ", " (map emName ems'))
           let messageText
-                | isDm && game /= "BDSP" = emText
-                | isDm = emText <> "\n\nDetails about BDSP parents aren't available right now (because PokeAPI doesn't provide this info). Please use Serebii or PokemonDB. Sorry!"
+                | game == "BDSP" = emText <> "\n\nDetails about BDSP parents aren't available right now (because PokeAPI doesn't provide this info). Please use Serebii or PokemonDB. Sorry!"
+                | isDm = emText
                 | otherwise = emText <> "\n\nFor full details about compatible parents, use this command in a DM with me!"
           let makeEmEmbedWithParents :: EggMove -> CreateEmbed
               makeEmEmbedWithParents em' =

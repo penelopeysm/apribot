@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TypeApplications #-}
 
 module PokeapiBridge
@@ -14,13 +15,14 @@ module PokeapiBridge
 where
 
 import Control.Concurrent.Async (mapConcurrently)
-import Control.Concurrent.QSem
-import Control.Exception (bracket_, throwIO, try)
-import Control.Monad (forM, replicateM)
+import Control.DeepSeq (NFData, force)
+import Control.Exception (throwIO, try, evaluate)
+import Control.Monad (forM, replicateM, (>=>))
 import Data.List (partition, sort)
 import Data.Maybe (catMaybes, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
+import GHC.Generics (Generic)
 import Paths_apribot (getDataFileName)
 import Pokeapi
 import System.Process (readProcess)
@@ -127,7 +129,9 @@ data Parent
   = LevelUpParent {lupPkmnName :: Text, lupOrder :: Int, lupLevel :: Int}
   | BreedParent {bpPkmnName :: Text, bpOrder :: Int}
   | BothParent {bothPkmnName :: Text, bothOrder :: Int, bothLevel :: Int}
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData Parent
 
 order :: Parent -> Int
 order (LevelUpParent _ o _) = o
@@ -189,14 +193,14 @@ identifyParent game moveName' eggGroupNames ecUrl' pkmn = do
         _ -> Nothing -- Move was found twice in the list, shouldn't happen
 
 getParents :: Game -> Move -> [Text] -> Text -> IO [Parent]
-getParents game mv eggGroupNames ecUrl' =
+getParents game mv eggGroupNames ecUrl' = do
   -- TODO: BDSP parents cannot be checked because of missing PokeAPI data
-  if game == BDSP
-    then pure []
-    else do
-      learners <- mapConcurrentlyLimited 30 resolve (moveLearnedByPokemon mv)
-      parents <- mapConcurrentlyLimited 30 (identifyParent game (moveName mv) eggGroupNames ecUrl') learners
-      pure $ catMaybes parents
+  let learners = moveLearnedByPokemon mv
+  let getParent learner = do
+        pkmn <- resolve learner
+        identifyParent game (moveName mv) eggGroupNames ecUrl' pkmn
+  parents <- mapConcurrentlyStrict getParent learners
+  pure $ catMaybes parents
 
 getMoveEnglishName :: Move -> Maybe Text
 getMoveEnglishName move =
@@ -313,6 +317,9 @@ em game pkmn = do
 
 -- * General
 
+mapConcurrentlyStrict :: (Control.DeepSeq.NFData b) => (a -> IO b) -> [a] -> IO [b]
+mapConcurrentlyStrict f = mapConcurrently (f >=> (evaluate . force))
+
 capitaliseFirst :: Text -> Text
 capitaliseFirst t = T.toUpper (T.take 1 t) <> T.drop 1 t
 
@@ -330,9 +337,3 @@ speciesNameToRealName t =
         . T.replace "mr-rime" "mr. Rime"
         . T.replace "flabebe" "flabébé"
         $ t'
-
--- | mapConcurrently but with only 50 actions at once.
-mapConcurrentlyLimited :: Int -> (a -> IO b) -> [a] -> IO [b]
-mapConcurrentlyLimited n f xs = do
-  sem <- newQSem n
-  mapConcurrently (bracket_ (waitQSem sem) (signalQSem sem) . f) xs
