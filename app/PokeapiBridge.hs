@@ -189,10 +189,14 @@ identifyParent game moveName' eggGroupNames ecUrl' pkmn = do
         _ -> Nothing -- Move was found twice in the list, shouldn't happen
 
 getParents :: Game -> Move -> [Text] -> Text -> IO [Parent]
-getParents game mv eggGroupNames ecUrl' = do
-  learners <- mapConcurrentlyLimited 30 resolve (moveLearnedByPokemon mv)
-  parents <- mapConcurrentlyLimited 30 (identifyParent game (moveName mv) eggGroupNames ecUrl') learners
-  pure $ catMaybes parents
+getParents game mv eggGroupNames ecUrl' =
+  -- TODO: BDSP parents cannot be checked because of missing PokeAPI data
+  if game == BDSP
+    then pure []
+    else do
+      learners <- mapConcurrentlyLimited 30 resolve (moveLearnedByPokemon mv)
+      parents <- mapConcurrentlyLimited 30 (identifyParent game (moveName mv) eggGroupNames ecUrl') learners
+      pure $ catMaybes parents
 
 getMoveEnglishName :: Move -> Maybe Text
 getMoveEnglishName move =
