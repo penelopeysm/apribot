@@ -189,7 +189,7 @@ respondEM m = do
       let pkmn = T.intercalate "-" rest
       ems <- liftIO $ try $ em SV pkmn
       pure $ Right (pkmn, "SV", ems)
-    _ -> pure $ Left "usage: `!em game pokemon` (game is usum, swsh, or sv). e.g. `!em swsh togepi`"
+    _ -> pure $ Left "usage: `!em game pokemon` (game is usum, bdsp, swsh, or sv). e.g. `!em swsh togepi`"
   case result of
     Left err -> replyTo m Nothing err
     Right (pkmn, game, ems) -> do
@@ -451,7 +451,7 @@ respondHelp m = do
       [ "**General commands**",
         "- `!help`: Show this message.",
         "- `!ha {pokemon}`: Show the hidden ability of a Pokémon",
-        "- `!em {game} {pokemon}`: Show egg moves for a Pokémon in a game. `{game}` can be `usum`, `swsh` or `sv`. If you use this command in a DM with the bot, it will also list potential parents.",
+        "- `!em {game} {pokemon}`: Show egg moves for a Pokémon in a game. `{game}` can be `usum`, `bdsp`, `swsh`, or `sv`. If you use this command in a DM with the bot, it will also list potential parents (except in BDSP).",
         "**Trading commands**",
         "- `!thread`: Reply to your trading partner in the trading forums with this to create a new thread in #thread-archive",
         "- `!close`: Close your trading post, or a thread you created"
