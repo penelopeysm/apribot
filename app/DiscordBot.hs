@@ -30,7 +30,7 @@ import qualified Discord.Requests as DR
 import Discord.Types
 import Pokeapi (PokeException (..))
 import PokeapiBridge
-import Reddit (Post (..), getPost, runRedditT)
+import Reddit (ID (..), Post (..), getPost, runRedditT)
 import Text.Printf (printf)
 import Trans
 
@@ -129,6 +129,14 @@ notifyLoop = do
               Nothing -> pure ()
               Just msg -> do
                 liftIO $ withConnection postsSql $ addNotifiedPost (postId post) (messageChannelId msg) (messageId msg)
+  -- Delete the post (if it's not supposed to be there)
+  let unnotifyPost :: ID Post -> App DiscordHandler ()
+      unnotifyPost pid = do
+        postsSql <- asks cfgPostsDbPath
+        notified <- liftIO $ withConnection postsSql $ checkNotifiedStatus pid
+        case notified of
+          Nothing -> pure ()
+          Just (chanId, msgId) -> restCall_ $ DR.DeleteMessage (chanId, msgId)
   -- Loop
   let chan = cfgChan cfg
   forever $ do
@@ -138,8 +146,8 @@ notifyLoop = do
         redditEnv <- authenticateAsOwner
         post <- runRedditT redditEnv $ getPost pid
         notifyPost post
-      NotifyPost post -> do
-        notifyPost post
+      NotifyPost post -> notifyPost post
+      UnnotifyPostById pid -> unnotifyPost pid
 
 createEmEmbedDescription :: EggMove -> Text
 createEmEmbedDescription em' =

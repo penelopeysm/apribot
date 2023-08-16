@@ -13,6 +13,7 @@ import System.Environment (getEnv, lookupEnv)
 data NotifyEvent
   = NotifyPost Post
   | NotifyPostById (ID Post)
+  | UnnotifyPostById (ID Post)
   deriving (Show)
 
 data Config = Config

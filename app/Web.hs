@@ -535,9 +535,12 @@ web = do
             else do
               liftIO $ withConnection postsSql $ addVote postId voter vote
               hit <- liftIO $ withConnection postsSql $ wasHit postId
-              when (hit == 0 && vote == 1) $ do
-                lift $ atomically $ T.putStrLn ("Notifying about mislabelled post " <> postId)
-                lift $ notifyDiscord (NotifyPostById (PostID postId))
+              when (hit == 0 && vote == 1) $ lift $ do
+                atomically $ T.putStrLn ("Notifying about false negative " <> postId)
+                notifyDiscord (NotifyPostById (PostID postId))
+              when (hit == 1 && vote == 0) $ lift $ do
+                atomically $ T.putStrLn ("Removing false positive " <> postId)
+                notifyDiscord (UnnotifyPostById (PostID postId))
               ST.redirect "/contribute"
         _ -> ST.redirect "/contrib_error"
 
