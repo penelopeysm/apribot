@@ -363,7 +363,7 @@ makeThread m = do
                           case channelThreadName chn of
                             Nothing -> replyTo m Nothing "You can only use this command within a forum thread."
                             Just tname -> do
-                              let threadName = author1 <> " & " <> author2 <> " | " <> tname
+                              let threadName = truncateThreadTitle $ author1 <> " & " <> author2 <> " | " <> tname
                               atomically $ T.putStrLn $ "Creating thread for " <> author1 <> " and " <> author2
                               eitherNewThread <-
                                 lift $
@@ -444,7 +444,7 @@ closeThread m = do
               restCall_ $
                 DR.ModifyChannel channelId $
                   def
-                    { DR.modifyChannelName = Just $ "[Closed] " <> fromMaybe "" (channelThreadName chn),
+                    { DR.modifyChannelName = Just $ truncateThreadTitle $ "[Closed] " <> fromMaybe "" (channelThreadName chn),
                       DR.modifyChannelThreadArchived = Just True,
                       DR.modifyChannelThreadLocked = Just True
                     }
@@ -564,3 +564,7 @@ getUserNick m =
    in case messageMember m of
         Nothing -> fallback
         Just guildMember -> fromMaybe fallback (memberNick guildMember)
+
+-- | Truncate a thread title to 100 characters
+truncateThreadTitle :: T.Text -> T.Text
+truncateThreadTitle t = if T.length t > 100 then T.take 97 t <> "..." else t
