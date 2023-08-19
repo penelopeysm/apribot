@@ -374,7 +374,7 @@ makeThread m = do
                                         { DR.startThreadNoMessageBaseOpts =
                                             DR.StartThreadOpts
                                               { DR.startThreadName = threadName,
-                                                DR.startThreadAutoArchive = Just 1440,
+                                                DR.startThreadAutoArchive = Just 10080,
                                                 DR.startThreadRateLimit = Nothing
                                               },
                                           DR.startThreadNoMessageType = 11, -- public thread
