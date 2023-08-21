@@ -480,6 +480,7 @@ respondHelp m = do
         "- `!help`: Show this message.",
         "- `!ha {pokemon}`: Show the hidden ability of a Pokémon",
         "- `!em {game} {pokemon}`: Show egg moves for a Pokémon in a game. `{game}` can be `usum`, `bdsp`, `swsh`, or `sv`. If you use this command in a DM with the bot, it will also list potential parents (except in BDSP).",
+        "- `!nature {pokemon}`: Show suggested natures for a Pokémon (collated from a couple of spreadsheets).",
         "**Trading commands**",
         "- `!thread`: Reply to your trading partner in the trading forums with this to create a new thread in #thread-archive",
         "- `!close`: Close your trading post, or a thread you created"
