@@ -7,7 +7,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Discord.Types
 import Paths_apribot (getDataFileName)
-import Reddit (Post, ID)
+import Reddit (ID, Post)
 import System.Environment (getEnv, lookupEnv)
 
 data NotifyEvent
@@ -29,6 +29,8 @@ data Config = Config
     cfgBbeChannelId :: ChannelId,
     -- | Discord channel to create trade overflow threads in
     cfgTradeOverflowChannelId :: ChannelId,
+    -- | Message to monitor for role reactions
+    cfgRoleReactionsMessageId :: Maybe MessageId,
     -- | Port to listen on.
     cfgPort :: Int,
     -- | User agent to use for Reddit API requests.
@@ -84,6 +86,8 @@ getConfig = do
   let cfgPtrChannelId = if cfgOnFly then 1120783589928345661 else 1132714928810238062
       cfgBbeChannelId = if cfgOnFly then 1120783566889037834 else 1132714951014875246
       cfgTradeOverflowChannelId = if cfgOnFly then 1133716162308489216 else 1133555612538646629
+      -- Disabled for now
+      cfgRoleReactionsMessageId = Nothing
       cfgPort = 8080
       cfgUserAgent = "github:penelopeysm/apribot by /u/is_a_togekiss"
       cfgRedirectUri =

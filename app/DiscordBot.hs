@@ -17,7 +17,10 @@ module DiscordBot (notifyDiscord, discordBot) where
 import Control.Concurrent (forkIO)
 import Control.Concurrent.Chan (readChan, writeChan)
 import Control.Exception (try)
+import Control.Monad (forM_)
 import Data.List (nub, sortOn)
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -28,6 +31,7 @@ import Database.SQLite.Simple (withConnection)
 import Discord
 import qualified Discord.Requests as DR
 import Discord.Types
+import Natures (getRecommendedNatures)
 import Pokeapi (PokeException (..))
 import PokeapiBridge
 import Reddit (ID (..), Post (..), getPost, runRedditT)
@@ -78,6 +82,13 @@ eventHandler e = do
     _ -> atomically $ print e >> putStrLn "" >> putStrLn ""
   case e of
     GuildCreate {} -> pure ()
+    MessageReactionAdd rinfo -> do
+      cfg <- ask
+      case cfgRoleReactionsMessageId cfg of
+        Just mid -> do
+          when (reactionMessageId rinfo == mid) $ do
+            addRole (reactionGuildId rinfo) (reactionUserId rinfo) (reactionEmoji rinfo)
+        Nothing -> pure ()
     MessageCreate m -> do
       cfg <- ask
       -- If running locally, ignore messages from other users
@@ -85,9 +96,11 @@ eventHandler e = do
         then pure ()
         else do
           let msgText = T.strip (messageContent m)
+          when ("!boost" == T.toLower msgText) (replyTo m Nothing "I'm a bot, I can't boost a server.")
           when ("!help" == T.toLower msgText) (respondHelp m)
           when ("!em " `T.isPrefixOf` T.toLower msgText) (respondEM m)
           when ("!ha " `T.isPrefixOf` T.toLower msgText) (respondHA m)
+          when ("!nature " `T.isPrefixOf` T.toLower msgText) (respondNature m)
           when ("!thread" `T.isPrefixOf` T.toLower msgText) (makeThread m)
           when (any (`T.isPrefixOf` T.toLower msgText) ["!close", "[close]"]) (closeThread m)
     -- Ignore other events (for now)
@@ -172,6 +185,13 @@ createEmEmbedDescription em' =
           [] -> []
           xs -> ["**Parents which learn by breeding**\n" <> T.intercalate ", " xs <> " (and evolutions)"]
    in T.intercalate "\n\n" (emFlavorText em' : levelUpParents <> breedParents)
+
+respondNature :: Message -> App DiscordHandler ()
+respondNature m = do
+  let msgText = T.strip (messageContent m)
+      pkmn = T.strip . T.drop 7 $ msgText
+      natureText = getRecommendedNatures pkmn
+  replyTo m Nothing natureText
 
 respondEM :: Message -> App DiscordHandler ()
 respondEM m = do
@@ -465,6 +485,34 @@ respondHelp m = do
         "- `!close`: Close your trading post, or a thread you created"
       ]
 
+ballRoles :: Map Text RoleId
+ballRoles =
+  M.fromList
+    [ ("beastball", 1142586472751444108),
+      ("dreamball", 1142587632111595603),
+      ("fastball", 1142587859212193793),
+      ("friendball", 1142588024518103110),
+      ("heavyball", 1142588347236237384),
+      ("levelball", 1142589194523377674),
+      ("loveball", 1142589700725547112),
+      ("lureball", 1142589833395589230),
+      ("moonball", 1142589959879000136),
+      ("safariball", 1142590142515785840),
+      ("sportball", 1142590314364817508)
+    ]
+
+addRole :: Maybe GuildId -> UserId -> Emoji -> App DiscordHandler ()
+addRole maybeGuildId uid emoji =
+  case maybeGuildId of
+    Nothing -> pure ()
+    Just gid -> do
+      case M.lookup (emojiName emoji) ballRoles of
+        Just rid -> do
+          forM_ (M.elems ballRoles) $ \rid' -> do
+            restCall_ $ DR.RemoveGuildMemberRole gid uid rid'
+          restCall_ $ DR.AddGuildMemberRole gid uid rid
+        Nothing -> pure ()
+
 -- * Helper functions
 
 -- | For convenience
@@ -513,6 +561,30 @@ makeMessageDetails post =
         Nothing -> cleanRedditMarkdown (postTitle post)
         Just f -> " [" <> f <> "] " <> cleanRedditMarkdown (postTitle post)
       truncatedTitle = if T.length title > maxTitleLength then T.take (maxTitleLength - 3) title <> "..." else title
+      embedColor = case (flair, T.toLower (postSubreddit post)) of
+        (Just "SV", "pokemontrades") -> DiscordColorRGB 122 53 55
+        (Just "SV", "bankballexchange") -> DiscordColorRGB 216 46 50
+        (Just "SWSH", "pokemontrades") -> DiscordColorRGB 133 77 192
+        (Just "SWSH", "bankballexchange") -> DiscordColorRGB 76 159 231
+        (Just "BDSP", "pokemontrades") -> DiscordColorRGB 184 142 226
+        (Just "BDSP", "bankballexchange") -> DiscordColorRGB 96 208 187
+        (Just "SMUSUM", "pokemontrades") -> DiscordColorRGB 230 150 63
+        (Just "SMUSUM", "bankballexchange") -> DiscordColorRGB 239 140 58
+        (Just "Giveaway", "pokemontrades") -> DiscordColorRGB 58 135 123
+        (Just "GIVEAWAY", "bankballexchange") -> DiscordColorRGB 237 239 241
+        (Just "CROSS-GEN", "bankballexchange") -> DiscordColorRGB 248 214 88
+        (Just "Tradeback", "pokemontrades") -> DiscordColorRGB 128 170 72
+        (Just "Home", "pokemontrades") -> DiscordColorRGB 70 155 80
+        (Just "XYORAS", "pokemontrades") -> DiscordColorRGB 38 65 149
+        (Just "Shiny", "pokemontrades") -> DiscordColorRGB 189 91 135
+        (Just "LGPE", "pokemontrades") -> DiscordColorRGB 207 178 59
+        (Just "Contest", "pokemontrades") -> DiscordColorRGB 48 113 114
+        (Just "Event", "pokemontrades") -> DiscordColorRGB 237 113 170
+        (Just s, "pokemontrades") ->
+          if "(Closed)" `T.isSuffixOf` s
+            then DiscordColorRGB 189 189 189
+            else DiscordColorRGB 235 145 163 -- A nice shade of pink
+        _ -> DiscordColorRGB 235 145 163 -- A nice shade of pink
    in def
         { DR.messageDetailedEmbeds =
             Just
@@ -521,7 +593,7 @@ makeMessageDetails post =
                     createEmbedTitle = truncatedTitle,
                     createEmbedDescription = summarisePostBody post,
                     createEmbedFooterText = footerText,
-                    createEmbedColor = Just DiscordColorLuminousVividPink,
+                    createEmbedColor = Just embedColor,
                     createEmbedTimestamp = Just (postCreatedTime post)
                   }
               ],
