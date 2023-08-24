@@ -632,18 +632,22 @@ mentionOnly userIds =
 
 -- | Attempt to get user's server nickname. Falls back to global username.
 getUserNick :: Message -> Maybe GuildId -> App DiscordHandler T.Text
-getUserNick m maybeGid = case maybeGid of
-  Nothing -> pure $ userName (messageAuthor m)
-  Just gid -> do
-    let fallback = userName (messageAuthor m)
-    maybeGuildMember <- case messageMember m of
-      Just mem -> pure (Just mem)
-      Nothing -> do
-        eitherGuildMember <- lift $ restCall $ DR.GetGuildMember gid (userId (messageAuthor m))
-        case eitherGuildMember of
-          Left _ -> pure Nothing
-          Right mem -> pure (Just mem)
-    pure $ fromMaybe fallback (maybeGuildMember >>= memberNick)
+getUserNick m maybeGid =
+  let auth = messageAuthor m
+   in case maybeGid of
+        Nothing -> pure $ userName auth
+        Just gid -> do
+          let fallback = case userGlobalName auth of
+                Nothing -> userName auth
+                Just gn -> gn
+          maybeGuildMember <- case messageMember m of
+            Just mem -> pure (Just mem)
+            Nothing -> do
+              eitherGuildMember <- lift $ restCall $ DR.GetGuildMember gid (userId (messageAuthor m))
+              case eitherGuildMember of
+                Left _ -> pure Nothing
+                Right mem -> pure (Just mem)
+          pure $ fromMaybe fallback (maybeGuildMember >>= memberNick)
 
 -- | Truncate a thread title to 100 characters
 truncateThreadTitle :: T.Text -> T.Text
