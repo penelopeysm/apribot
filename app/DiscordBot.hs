@@ -266,7 +266,6 @@ respondEM m = do
                     createEmbedColor = Just DiscordColorLuminousVividPink
                   }
           restCall_ $
-            -- TODO: use separate embeds when there are more than 10 egg moves
             DR.CreateMessageDetailed
               (messageChannelId m)
               ( def
@@ -277,6 +276,21 @@ respondEM m = do
                       if isDm && game /= "BDSP"
                         then Just (take 10 $ map makeEmEmbedWithParents ems')
                         else Just [emEmbedShort]
+                  }
+              )
+          -- Send a second message with the rest of the egg moves. We assume no
+          -- species has more than 20 egg moves.
+          when (length ems' > 10) $ restCall_ $
+            DR.CreateMessageDetailed
+              (messageChannelId m)
+              ( def
+                  { DR.messageDetailedReference = Nothing,
+                    DR.messageDetailedContent = "(continued from above)",
+                    DR.messageDetailedAllowedMentions = Nothing,
+                    DR.messageDetailedEmbeds =
+                      if isDm && game /= "BDSP"
+                        then Just (drop 10 $ map makeEmEmbedWithParents ems')
+                        else Nothing
                   }
               )
 
