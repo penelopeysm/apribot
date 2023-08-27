@@ -23,6 +23,8 @@ data Config = Config
     cfgTokensDbPath :: FilePath,
     -- | Path to web app static directory
     cfgStaticDir :: FilePath,
+    -- | Guild id
+    cfgAprimarketGuildId :: GuildId,
     -- | Discord channel to post /r/pokemontrades posts to.
     cfgPtrChannelId :: ChannelId,
     -- | Discord channel to post /r/bankballexchange posts to.
@@ -31,6 +33,8 @@ data Config = Config
     cfgTradeOverflowChannelId :: ChannelId,
     -- | Message to monitor for role reactions
     cfgRoleReactionsMessageId :: Maybe MessageId,
+    -- | Discord channel for #potluck-signup
+    cfgPotluckSignupChannelId :: ChannelId,
     -- | Port to listen on.
     cfgPort :: Int,
     -- | User agent to use for Reddit API requests.
@@ -83,9 +87,11 @@ getConfig = do
   cfgTokensDbPath <- getDataFileName "data/tokens.db"
   cfgClassifierPath <- getDataFileName "python/predict.py"
 
-  let cfgPtrChannelId = if cfgOnFly then 1120783589928345661 else 1132714928810238062
+  let cfgAprimarketGuildId = 1120782351811739689
+      cfgPtrChannelId = if cfgOnFly then 1120783589928345661 else 1132714928810238062
       cfgBbeChannelId = if cfgOnFly then 1120783566889037834 else 1132714951014875246
       cfgTradeOverflowChannelId = if cfgOnFly then 1133716162308489216 else 1133555612538646629
+      cfgPotluckSignupChannelId = 1144082624613204029
       -- Disabled for now
       cfgRoleReactionsMessageId = Nothing
       cfgPort = 8080

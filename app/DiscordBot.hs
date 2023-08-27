@@ -17,13 +17,14 @@ module DiscordBot (notifyDiscord, discordBot) where
 import Control.Concurrent (forkIO)
 import Control.Concurrent.Chan (readChan, writeChan)
 import Control.Exception (try)
-import Control.Monad (forM_)
+import Control.Monad (forM, forM_)
 import Data.List (nub, sortOn)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import qualified Data.Text.IO as T
 import Data.Time.Clock.System (getSystemTime, systemSeconds)
 import Database (addNotifiedPost, checkNotifiedStatus)
@@ -98,6 +99,7 @@ eventHandler e = do
           let msgText = T.strip (messageContent m)
           when ("!boost" == T.toLower msgText) (replyTo m Nothing "I'm a bot, I can't boost a server.")
           when ("!help" == T.toLower msgText) (respondHelp m)
+          when ("!potluck" == T.toLower msgText) (respondPotluck m)
           when ("!em " `T.isPrefixOf` T.toLower msgText) (respondEM m)
           when ("!ha " `T.isPrefixOf` T.toLower msgText) (respondHA m)
           when ("!nature " `T.isPrefixOf` T.toLower msgText) (respondNature m)
@@ -280,19 +282,20 @@ respondEM m = do
               )
           -- Send a second message with the rest of the egg moves. We assume no
           -- species has more than 20 egg moves.
-          when (length ems' > 10) $ restCall_ $
-            DR.CreateMessageDetailed
-              (messageChannelId m)
-              ( def
-                  { DR.messageDetailedReference = Nothing,
-                    DR.messageDetailedContent = "(continued from above)",
-                    DR.messageDetailedAllowedMentions = Nothing,
-                    DR.messageDetailedEmbeds =
-                      if isDm && game /= "BDSP"
-                        then Just (drop 10 $ map makeEmEmbedWithParents ems')
-                        else Nothing
-                  }
-              )
+          when (length ems' > 10) $
+            restCall_ $
+              DR.CreateMessageDetailed
+                (messageChannelId m)
+                ( def
+                    { DR.messageDetailedReference = Nothing,
+                      DR.messageDetailedContent = "(continued from above)",
+                      DR.messageDetailedAllowedMentions = Nothing,
+                      DR.messageDetailedEmbeds =
+                        if isDm && game /= "BDSP"
+                          then Just (drop 10 $ map makeEmEmbedWithParents ems')
+                          else Nothing
+                    }
+                )
 
 respondHA :: Message -> App DiscordHandler ()
 respondHA m = do
@@ -360,6 +363,63 @@ respondHA m = do
               }
           )
 
+respondPotluck :: Message -> App DiscordHandler ()
+respondPotluck m = do
+  let canonicaliseEmoji e = case emojiName e of
+        "\128175" -> Just (":100:" :: Text)
+        "beastball" -> Just "Beast"
+        "dreamball" -> Just "Dream"
+        "fastball" -> Just "Fast"
+        "friendball" -> Just "Friend"
+        "heavyball" -> Just "Heavy"
+        "levelball" -> Just "Level"
+        "loveball" -> Just "Love"
+        "lureball" -> Just "Lure"
+        "moonball" -> Just "Moon"
+        "safariball" -> Just "Safari"
+        "sportball" -> Just "Sport"
+        _ -> Nothing
+  -- Show typing indicator
+  restCall_ $ DR.TriggerTypingIndicator (messageChannelId m)
+  -- Fetch latest message from the #potluck-signup channel
+  plChannelId <- asks cfgPotluckSignupChannelId
+  guildId <- asks cfgAprimarketGuildId
+  eitherMsg <- lift $ restCall $ DR.GetChannelMessages plChannelId (1, DR.LatestMessages)
+  case eitherMsg of
+    Right [latestMsg] -> do
+      -- Grab reactions
+      let emojis = map messageReactionEmoji (messageReactions latestMsg)
+      maybeReactions <- forM emojis $ \e -> do
+        case canonicaliseEmoji e of
+          Just simpleName -> do
+            let emoji = case emojiId e of
+                  Nothing -> emojiName e -- Builtin emoji
+                  Just eid -> emojiName e <> ":" <> T.pack (show eid) -- Custom emoji
+            atomically $ print emoji
+            users <- lift $ restCall $ DR.GetReactions (plChannelId, messageId latestMsg) emoji (100, DR.LatestReaction)
+            case users of
+              Right users' -> pure $ Just (simpleName, users')
+              Left _ -> pure Nothing
+          Nothing -> pure Nothing
+      -- Construct csv
+      let reactions = M.fromList . catMaybes $ maybeReactions
+          allUsers = nub . concat . M.elems $ reactions
+      userNicknames <- fmap M.fromList $ forM allUsers $ \u -> do
+        let uid = userId u
+        nick <- getUserNick u (Just guildId)
+        pure (uid, nick)
+      let headerRow = T.intercalate "," $ "User" : M.keys reactions
+          userRow user = T.intercalate "," $ (userNicknames M.! userId user) : map (\k -> if user `elem` (reactions M.! k) then "1" else "") (M.keys reactions)
+          csv = T.intercalate "\n" $ headerRow : map userRow allUsers
+      restCall_ $
+        DR.CreateMessageDetailed (messageChannelId m) $
+          def
+            { DR.messageDetailedContent = "Reactions to latest message in #potluck-signup (download the file and open in a spreadsheet programme)" ,
+              DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
+              DR.messageDetailedFile = Just ("potluck-reactions.csv", TE.encodeUtf8 csv)
+            }
+    _ -> replyTo m Nothing "Could not get latest message from #potluck-signup"
+
 makeThread :: Message -> App DiscordHandler ()
 makeThread m = do
   cfg <- ask
@@ -376,8 +436,8 @@ makeThread m = do
             Right repliedMsg -> do
               let authorId1 = userId (messageAuthor m)
                   authorId2 = userId (messageAuthor repliedMsg)
-              author1 <- getUserNick m (messageGuildId m)
-              author2 <- getUserNick repliedMsg (messageGuildId m)
+              author1 <- getUserNickFromMessage m (messageGuildId m)
+              author2 <- getUserNickFromMessage repliedMsg (messageGuildId m)
               eitherFirstMsg <- lift $ restCall $ DR.GetChannelMessages rcid (1, DR.AfterMessage 0)
               case eitherFirstMsg of
                 Left errr' -> do
@@ -645,8 +705,8 @@ mentionOnly userIds =
     }
 
 -- | Attempt to get user's server nickname. Falls back to global username.
-getUserNick :: Message -> Maybe GuildId -> App DiscordHandler T.Text
-getUserNick m maybeGid =
+getUserNickFromMessage :: Message -> Maybe GuildId -> App DiscordHandler T.Text
+getUserNickFromMessage m maybeGid =
   let auth = messageAuthor m
    in case maybeGid of
         Nothing -> pure $ userName auth
@@ -657,11 +717,30 @@ getUserNick m maybeGid =
           maybeGuildMember <- case messageMember m of
             Just mem -> pure (Just mem)
             Nothing -> do
-              eitherGuildMember <- lift $ restCall $ DR.GetGuildMember gid (userId (messageAuthor m))
+              eitherGuildMember <- lift $ restCall $ DR.GetGuildMember gid (userId auth)
               case eitherGuildMember of
                 Left _ -> pure Nothing
                 Right mem -> pure (Just mem)
           pure $ fromMaybe fallback (maybeGuildMember >>= memberNick)
+
+-- | Attempt to get user's server nickname, but from a User instead of a
+-- message. Falls back to global username.
+--
+-- TODO: refactor to avoid code duplication with the above
+getUserNick :: User -> Maybe GuildId -> App DiscordHandler T.Text
+getUserNick u maybeGid =
+  case maybeGid of
+    Nothing -> pure $ userName u
+    Just gid -> do
+      let fallback = case userGlobalName u of
+            Nothing -> userName u
+            Just gn -> gn
+      maybeGuildMember <- do
+        eitherGuildMember <- lift $ restCall $ DR.GetGuildMember gid (userId u)
+        case eitherGuildMember of
+          Left _ -> pure Nothing
+          Right mem -> pure (Just mem)
+      pure $ fromMaybe fallback (maybeGuildMember >>= memberNick)
 
 -- | Truncate a thread title to 100 characters
 truncateThreadTitle :: T.Text -> T.Text
