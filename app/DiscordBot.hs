@@ -25,6 +25,7 @@ import qualified Data.Map.Strict as M
 import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import qualified Data.Text.IO as T
 import Data.Time.Clock.System (getSystemTime, systemSeconds)
 import Database (addNotifiedPost, checkNotifiedStatus)
@@ -100,6 +101,7 @@ eventHandler e = do
           when ("!boost" == T.toLower msgText) (replyTo m Nothing "I'm a bot, I can't boost a server.")
           when ("!help" == T.toLower msgText) (respondHelp m)
           when ("!potluck" == T.toLower msgText) (respondPotluck m)
+          when ("!potluck2" == T.toLower msgText) (respondPotluck2 m)
           when ("!em " `T.isPrefixOf` T.toLower msgText) (respondEM m)
           when ("!ha " `T.isPrefixOf` T.toLower msgText) (respondHA m)
           when ("!nature " `T.isPrefixOf` T.toLower msgText) (respondNature m)
@@ -206,11 +208,11 @@ respondEM m = do
     "!em" : "usum" : rest -> do
       let pkmn = T.intercalate "-" rest
       ems <- liftIO $ try $ em USUM pkmn
-      pure $ Right (pkmn, "USUM" :: T.Text, ems)
+      pure $ Right (pkmn, "USUM" :: Text, ems)
     "!em" : "swsh" : rest -> do
       let pkmn = T.intercalate "-" rest
       ems <- liftIO $ try $ em SwSh pkmn
-      pure $ Right (pkmn, "SwSh" :: T.Text, ems)
+      pure $ Right (pkmn, "SwSh" :: Text, ems)
     "!em" : "bdsp" : rest -> do
       let pkmn = T.intercalate "-" rest
       ems <- liftIO $ try $ em BDSP pkmn
@@ -417,7 +419,87 @@ respondPotluck m = do
           tableWidth = T.length (head tableRows)
           dashes = T.replicate tableWidth "-"
           table = T.unlines $ head tableRows : dashes : intercalateEvery 5 dashes (tail tableRows)
-      replyTo m Nothing $ "Reactions to latest message in #potluck-signup\n```" <> table <> "```"
+      replyWithFile m "Reactions to latest message in #potluck-signup" "potluck-reactions.txt" table
+    _ -> replyTo m Nothing "Could not get latest message from #potluck-signup"
+
+-- | Temporary function for algorithm testing
+respondPotluck2 :: Message -> App DiscordHandler ()
+respondPotluck2 m = do
+  let canonicaliseEmoji e = case emojiName e of
+        "\128175" -> Just ("100" :: Text)
+        "beastball" -> Just "Bea"
+        "dreamball" -> Just "Dre"
+        "fastball" -> Just "Fas"
+        "friendball" -> Just "Fri"
+        "heavyball" -> Just "Hea"
+        "levelball" -> Just "Lev"
+        "loveball" -> Just "Lov"
+        "lureball" -> Just "Lur"
+        "moonball" -> Just "Moo"
+        "safariball" -> Just "Saf"
+        "sportball" -> Just "Spo"
+        _ -> Nothing
+  -- Fetch latest message from the #potluck-signup channel
+  plChannelId <- asks cfgPotluckSignupChannelId
+  guildId <- asks cfgAprimarketGuildId
+  eitherMsg <- lift $ restCall $ DR.GetChannelMessages plChannelId (1, DR.LatestMessages)
+  case eitherMsg of
+    Right [latestMsg] -> do
+      -- Grab reactions
+      let emojis = map messageReactionEmoji (messageReactions latestMsg)
+      maybeReactions <- forM emojis $ \e -> do
+        case canonicaliseEmoji e of
+          Just simpleName -> do
+            let emoji = case emojiId e of
+                  Nothing -> emojiName e -- Builtin emoji
+                  Just eid -> emojiName e <> ":" <> T.pack (show eid) -- Custom emoji
+            atomically $ print emoji
+            users <- lift $ restCall $ DR.GetReactions (plChannelId, messageId latestMsg) emoji (100, DR.LatestReaction)
+            case users of
+              Right users' -> pure $ Just (simpleName, users')
+              Left _ -> pure Nothing
+          Nothing -> pure Nothing
+      -- Construct ASCII table but IGNORING 100s for now
+      let reactions = M.filterWithKey (\k _ -> k /= "100") $ M.fromList . catMaybes $ maybeReactions
+          allUsers = nub . concat . M.elems $ reactions
+      -- Construct row vector of total reacts
+      let nReactions = T.intercalate "," . map (T.pack . show . length) $ M.elems reactions
+      -- Construct matrix of reacts
+      let userRow user = T.intercalate "," $ map (\k -> if user `elem` (reactions M.! k) then "1" else "0") (M.keys reactions)
+          userRows = map userRow allUsers
+          table = T.unlines userRows
+      -- Print column names
+      let colNames = T.intercalate "," (M.keys reactions)
+      -- Print row names
+      userNicknames <- fmap M.fromList $ forM allUsers $ \u -> do
+        let uid = userId u
+        nick <- T.strip . T.filter (\c -> wcwidth c == 1) <$> getUserNick u (Just guildId)
+        let quotedNick = if T.any (== ',') nick then "\"" <> nick <> "\"" else nick
+        pure (uid, quotedNick)
+      let rowNames = T.intercalate "," $ map (\user -> userNicknames M.! userId user) allUsers
+
+      replyTo m Nothing $
+        T.unlines
+          [ "Total reactions to latest message in #potluck-signup",
+            "```",
+            nReactions,
+            "```",
+            "",
+            "Reaction matrix",
+            "```",
+            table,
+            "```",
+            "",
+            "Column names",
+            "```",
+            colNames,
+            "```",
+            "",
+            "Row names",
+            "```",
+            rowNames,
+            "```"
+          ]
     _ -> replyTo m Nothing "Could not get latest message from #potluck-signup"
 
 makeThread :: Message -> App DiscordHandler ()
@@ -608,7 +690,7 @@ restCall_ req = do
     Left e -> atomically $ print e
     Right _ -> pure ()
 
-cleanRedditMarkdown :: T.Text -> T.Text
+cleanRedditMarkdown :: Text -> Text
 cleanRedditMarkdown = T.replace "#" "\\#" . T.replace "&#x200B;" "" . T.replace "&amp;" "&" . T.replace "&lt;" "<" . T.replace "&gt;" ">"
 
 -- | Get the first element of a list, if it exists
@@ -617,7 +699,7 @@ mbHead Nothing = Nothing
 mbHead (Just []) = Nothing
 mbHead (Just (x : _)) = Just x
 
-summarisePostBody :: Post -> T.Text
+summarisePostBody :: Post -> Text
 summarisePostBody post =
   let body = case mbHead (postCrosspostParents post) of
         Nothing -> cleanRedditMarkdown (postBody post)
@@ -685,7 +767,7 @@ makeMessageDetails post =
           DR.messageDetailedContent = ""
         }
 
-replyTo :: Message -> Maybe [UserId] -> T.Text -> App DiscordHandler ()
+replyTo :: Message -> Maybe [UserId] -> Text -> App DiscordHandler ()
 replyTo m allowedMentions txt =
   restCall_ $
     DR.CreateMessageDetailed
@@ -697,10 +779,10 @@ replyTo m allowedMentions txt =
           }
       )
 
-tshow :: (Show a) => a -> T.Text
+tshow :: (Show a) => a -> Text
 tshow = T.pack . show
 
-getChannelUrl :: Channel -> T.Text
+getChannelUrl :: Channel -> Text
 getChannelUrl c = "https://discord.com/channels/" <> tshow (channelGuild c) <> "/" <> tshow (channelId c)
 
 mentionOnly :: [UserId] -> DR.AllowedMentions
@@ -715,7 +797,7 @@ mentionOnly userIds =
     }
 
 -- | Attempt to get user's server nickname. Falls back to global username.
-getUserNickFromMessage :: Message -> Maybe GuildId -> App DiscordHandler T.Text
+getUserNickFromMessage :: Message -> Maybe GuildId -> App DiscordHandler Text
 getUserNickFromMessage m maybeGid =
   let auth = messageAuthor m
    in case maybeGid of
@@ -737,7 +819,7 @@ getUserNickFromMessage m maybeGid =
 -- message. Falls back to global username.
 --
 -- TODO: refactor to avoid code duplication with the above
-getUserNick :: User -> Maybe GuildId -> App DiscordHandler T.Text
+getUserNick :: User -> Maybe GuildId -> App DiscordHandler Text
 getUserNick u maybeGid =
   case maybeGid of
     Nothing -> pure $ userName u
@@ -753,7 +835,7 @@ getUserNick u maybeGid =
       pure $ fromMaybe fallback (maybeGuildMember >>= memberNick)
 
 -- | Truncate a thread title to 100 characters
-truncateThreadTitle :: T.Text -> T.Text
+truncateThreadTitle :: Text -> Text
 truncateThreadTitle t = if T.length t > 100 then T.take 97 t <> "..." else t
 
 intercalateEvery :: Int -> a -> [a] -> [a]
@@ -761,3 +843,16 @@ intercalateEvery n s xs =
   case splitAt n xs of
     (ys, []) -> ys
     (ys, zs) -> ys ++ s : intercalateEvery n s zs
+
+replyWithFile :: Message -> Text -> Text -> Text -> App DiscordHandler ()
+replyWithFile m msgContents fname fcontents = do
+  restCall_ $
+    DR.CreateMessageDetailed
+      (messageChannelId m)
+      ( def
+          { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
+            DR.messageDetailedContent = msgContents,
+            DR.messageDetailedAllowedMentions = Just (mentionOnly []),
+            DR.messageDetailedFile = Just (fname, TE.encodeUtf8 fcontents)
+          }
+      )
