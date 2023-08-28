@@ -548,16 +548,26 @@ closeThread m = do
 
 respondHelp :: Message -> App DiscordHandler ()
 respondHelp m = do
+  guild <- asks cfgAprimarketGuildId
+  chan <- asks cfgPotluckSignupChannelId
   replyTo m Nothing $
     T.unlines
       [ "**General commands**",
-        "- `!help`: Show this message.",
-        "- `!ha {pokemon}`: Show the hidden ability of a Pokémon",
-        "- `!em {game} {pokemon}`: Show egg moves for a Pokémon in a game. `{game}` can be `usum`, `bdsp`, `swsh`, or `sv`. If you use this command in a DM with the bot, it will also list potential parents (except in BDSP).",
-        "- `!nature {pokemon}`: Show suggested natures for a Pokémon (collated from a couple of spreadsheets).",
+        "- `!help`",
+        "  Show this message.",
+        "- `!ha {pokemon}`",
+        "  Show the hidden ability of a Pokémon",
+        "- `!em {game} {pokemon}`",
+        "  Show egg moves for a Pokémon in a game. `{game}` can be `usum`, `bdsp`, `swsh`, or `sv`. If you use this command in a DM with the bot, it will also list potential parents.",
+        "- `!nature {pokemon}`",
+        "  Show suggested natures for a Pokémon (collated from a couple of spreadsheets).",
+        "- `!potluck`",
+        "  Show a summary of reactions to the most recent post in https://discord.com/channels/" <> tshow guild <> "/" <> tshow chan,
         "**Trading commands**",
-        "- `!thread`: Reply to your trading partner in the trading forums with this to create a new thread in #thread-archive",
-        "- `!close`: Close your trading post, or a thread you created"
+        "- `!thread`",
+        "  Reply to your trading partner in the trading forums with this to create a new thread in #thread-archive",
+        "- `!close`",
+        "  Close your trading post, or a thread you created"
       ]
 
 ballRoles :: Map Text RoleId
