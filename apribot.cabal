@@ -101,6 +101,7 @@ executable apribot
                       text,
                       time,
                       transformers,
+                      wcwidth,
                       xss-sanitize,
 
     -- Directories containing source files.
