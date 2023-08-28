@@ -14,11 +14,11 @@
 -- where DiscordHandler is a synonym for ReaderT DiscordHandle IO.
 module DiscordBot (notifyDiscord, discordBot) where
 
-import Data.Char.WCWidth (wcwidth)
 import Control.Concurrent (forkIO)
 import Control.Concurrent.Chan (readChan, writeChan)
 import Control.Exception (try)
 import Control.Monad (forM, forM_)
+import Data.Char.WCWidth (wcwidth)
 import Data.List (nub, sortOn, transpose)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
@@ -250,10 +250,10 @@ respondEM m = do
         -- Egg moves
         Right ems' -> do
           let emText = T.pack $ printf "%s egg moves in %s: %s" (speciesNameToRealName pkmn) game (T.intercalate ", " (map emName ems'))
-          let messageText
-                | game == "BDSP" = emText <> "\n\nDetails about BDSP parents aren't available right now (because PokeAPI doesn't provide this info). Please use Serebii or PokemonDB. Sorry!"
-                | isDm = emText
-                | otherwise = emText <> "\n\nFor full details about compatible parents, use this command in a DM with me!"
+          let messageText =
+                if isDm
+                  then emText
+                  else emText <> "\n\nFor full details about compatible parents, use this command in a DM with me!"
           let makeEmEmbedWithParents :: EggMove -> CreateEmbed
               makeEmEmbedWithParents em' =
                 def
@@ -275,7 +275,7 @@ respondEM m = do
                     DR.messageDetailedContent = messageText,
                     DR.messageDetailedAllowedMentions = Nothing,
                     DR.messageDetailedEmbeds =
-                      if isDm && game /= "BDSP"
+                      if isDm
                         then Just (take 10 $ map makeEmEmbedWithParents ems')
                         else Just [emEmbedShort]
                   }
@@ -366,18 +366,18 @@ respondHA m = do
 respondPotluck :: Message -> App DiscordHandler ()
 respondPotluck m = do
   let canonicaliseEmoji e = case emojiName e of
-        "\128175" -> Just (":100:" :: Text)
-        "beastball" -> Just "Beast"
-        "dreamball" -> Just "Dream"
-        "fastball" -> Just "Fast"
-        "friendball" -> Just "Friend"
-        "heavyball" -> Just "Heavy"
-        "levelball" -> Just "Level"
-        "loveball" -> Just "Love"
-        "lureball" -> Just "Lure"
-        "moonball" -> Just "Moon"
-        "safariball" -> Just "Safari"
-        "sportball" -> Just "Sport"
+        "\128175" -> Just ("100" :: Text)
+        "beastball" -> Just "Bea"
+        "dreamball" -> Just "Dre"
+        "fastball" -> Just "Fas"
+        "friendball" -> Just "Fri"
+        "heavyball" -> Just "Hea"
+        "levelball" -> Just "Lev"
+        "loveball" -> Just "Lov"
+        "lureball" -> Just "Lur"
+        "moonball" -> Just "Moo"
+        "safariball" -> Just "Saf"
+        "sportball" -> Just "Spo"
         _ -> Nothing
   -- eyes react because this one takes a while
   restCall_ $ DR.CreateReaction (messageChannelId m, messageId m) ":eyes:"
@@ -409,11 +409,14 @@ respondPotluck m = do
         nick <- T.strip . T.filter (\c -> wcwidth c == 1) <$> getUserNick u (Just guildId)
         pure (uid, nick)
       let headerRow = "User" : M.keys reactions
-          userRow user = (userNicknames M.! userId user) : map (\k -> if user `elem` (reactions M.! k) then "1" else "") (M.keys reactions)
+          userRow user = (userNicknames M.! userId user) : map (\k -> if user `elem` (reactions M.! k) then "x" else "") (M.keys reactions)
           userRows = map userRow allUsers
           fieldWidths = map (maximum . map T.length) (transpose (headerRow : userRows))
-          padRow = zipWith (`T.justifyLeft` '.') fieldWidths
-          table = T.unlines . map (T.intercalate " | " . padRow) $ headerRow : userRows
+          padRow row = T.justifyLeft (head fieldWidths) ' ' (head row) : zipWith (`T.center` ' ') (tail fieldWidths) (tail row)
+          tableRows = map (T.intercalate "|" . padRow) $ headerRow : userRows
+          tableWidth = T.length (head tableRows)
+          dashes = T.replicate tableWidth "-"
+          table = T.unlines $ head tableRows : dashes : intercalateEvery 5 dashes (tail tableRows)
       replyTo m Nothing $ "Reactions to latest message in #potluck-signup\n```" <> table <> "```"
     _ -> replyTo m Nothing "Could not get latest message from #potluck-signup"
 
@@ -742,3 +745,9 @@ getUserNick u maybeGid =
 -- | Truncate a thread title to 100 characters
 truncateThreadTitle :: T.Text -> T.Text
 truncateThreadTitle t = if T.length t > 100 then T.take 97 t <> "..." else t
+
+intercalateEvery :: Int -> a -> [a] -> [a]
+intercalateEvery n s xs =
+  case splitAt n xs of
+    (ys, []) -> ys
+    (ys, zs) -> ys ++ s : intercalateEvery n s zs

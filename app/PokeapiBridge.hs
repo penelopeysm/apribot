@@ -16,16 +16,14 @@ where
 
 import Control.Concurrent.Async (mapConcurrently)
 import Control.DeepSeq (NFData, force)
-import Control.Exception (throwIO, try, evaluate)
+import Control.Exception (evaluate, throwIO, try)
 import Control.Monad (forM, replicateM, (>=>))
 import Data.List (partition, sort)
 import Data.Maybe (catMaybes, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
-import Paths_apribot (getDataFileName)
 import Pokeapi
-import System.Process (readProcess)
 import System.Random (randomRIO)
 
 terror :: Text -> IO a
@@ -194,7 +192,6 @@ identifyParent game moveName' eggGroupNames ecUrl' pkmn = do
 
 getParents :: Game -> Move -> [Text] -> Text -> IO [Parent]
 getParents game mv eggGroupNames ecUrl' = do
-  -- TODO: BDSP parents cannot be checked because of missing PokeAPI data
   let learners = moveLearnedByPokemon mv
   let getParent learner = do
         pkmn <- resolve learner
@@ -287,23 +284,9 @@ em game pkmn = do
     Right poke -> do
       species <- resolve (pokemonSpecies poke)
       eggGroupNames <- getEggGroups species
-      actualMoves <- case game of
-        -- PokeAPI doesn't have BDSP egg moves so we scrape from PokemonDB
-        -- instead (and pray that the moves come out with the same names as in
-        -- PokeAPI)
-        -- Hopefully this is temporary. The long term aim would be to add BDSP
-        -- egg moves to PokeAPI. I opened an issue:
-        -- https://github.com/PokeAPI/pokeapi/issues/914
-        BDSP -> do
-          bdspEmPath <- getDataFileName "python/bdsp_em.py"
-          bdspEms <- try $ readProcess bdspEmPath [T.unpack pkmn] ""
-          case bdspEms of
-            Left (_ :: IOError) -> throwIO $ PokeException "Failed to get BDSP egg moves"
-            Right ems -> mapM get (T.words . T.pack $ ems)
-        _ -> do
-          let moves = pokemonMoves poke
-          let moves' = filter (isEggMove game) moves
-          mapM (resolve . pmMove) moves'
+      actualMoves <- do
+        let ems = filter (isEggMove game) (pokemonMoves poke)
+        mapM (resolve . pmMove) ems
       let mkEggMove :: Move -> IO (Maybe EggMove)
           mkEggMove m = do
             case getMoveEnglishName m of
