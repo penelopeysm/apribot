@@ -69,6 +69,34 @@ startup = do
     DR.CreateMessage
       1132000877415247903
       ("ApriBot started on " <> platform <> " at: <t:" <> T.pack (show now) <> ">")
+  -- Get Cherish Ball reacts on main message
+  users1 <-
+    lift $
+      restCall $
+        DR.GetReactions
+          (1120783101988180078, 1132810456474595429)
+          ":cherishball:1132047633658163270"
+          (100, DR.LatestReaction)
+  users2 <-
+    lift $
+      restCall $
+        DR.GetReactions
+          (1120783101988180078, 1132810456474595429)
+          ":cherishball:1132047633658163270"
+          (100, DR.AfterReaction 1083169796880859257)
+  case (users1, users2) of
+    (Right u1, Right u2) -> do
+      forM_ (u1 <> u2) $ \u -> do
+        gid <- asks cfgAprimarketGuildId
+        eitherGuildMember <- lift $ restCall $ DR.GetGuildMember gid (userId u)
+        case eitherGuildMember of
+          Left _ -> atomically $ T.putStrLn $ "Failed to get guild member " <> userName u
+          Right mem -> do
+            atomically $ T.putStrLn $ userName u
+            when
+              (1131737932173152307 `notElem` memberRoles mem)
+              (atomically $ T.putStrLn $ "*** ERROR: " <> userName u <> " does not have verified role")
+    _ -> pure ()
 
 -- | Discord event handler. Right now, this does two things:
 --
