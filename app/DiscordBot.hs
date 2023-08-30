@@ -286,7 +286,7 @@ respondEM m = do
               )
           -- Send a second message with the rest of the egg moves. We assume no
           -- species has more than 16 egg moves.
-          when (length ems' > 8) $
+          when (length ems' > 8 && isDm) $
             restCall_ $
               DR.CreateMessageDetailed
                 (messageChannelId m)
