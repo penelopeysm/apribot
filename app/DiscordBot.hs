@@ -280,13 +280,13 @@ respondEM m = do
                     DR.messageDetailedAllowedMentions = Nothing,
                     DR.messageDetailedEmbeds =
                       if isDm
-                        then Just (take 8 $ map makeEmEmbedWithParents ems')
+                        then Just (take 9 $ map makeEmEmbedWithParents ems')
                         else Just [emEmbedShort]
                   }
               )
           -- Send a second message with the rest of the egg moves. We assume no
           -- species has more than 16 egg moves.
-          when (length ems' > 8 && isDm) $
+          when (length ems' > 9 && isDm) $
             restCall_ $
               DR.CreateMessageDetailed
                 (messageChannelId m)
@@ -295,8 +295,8 @@ respondEM m = do
                       DR.messageDetailedContent = "(continued from above)",
                       DR.messageDetailedAllowedMentions = Nothing,
                       DR.messageDetailedEmbeds =
-                        if isDm && game /= "BDSP"
-                          then Just (drop 8 $ map makeEmEmbedWithParents ems')
+                        if isDm
+                          then Just (drop 9 $ map makeEmEmbedWithParents ems')
                           else Nothing
                     }
                 )
