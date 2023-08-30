@@ -22,7 +22,7 @@ import Data.Char.WCWidth (wcwidth)
 import Data.List (nub, sortOn, transpose)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
-import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
+import Data.Maybe (catMaybes, fromMaybe, isNothing, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -154,7 +154,7 @@ notifyLoop = do
   -- Post the post into the appropriate channel, if it hasn't already been
   -- notified about
   let notifyPost :: Post -> App DiscordHandler ()
-      notifyPost post = do
+      notifyPost post = when (isNothing $ postDeleted post) $ do
         postsSql <- asks cfgPostsDbPath
         alreadyNotified <- liftIO $ withConnection postsSql $ checkNotifiedStatus (postId post)
         case alreadyNotified of
