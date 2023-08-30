@@ -33,6 +33,8 @@ data Config = Config
     cfgTradeOverflowChannelId :: ChannelId,
     -- | Message to monitor for role reactions
     cfgRoleReactionsMessageId :: Maybe MessageId,
+    -- | Discord channel for #potluck-vote
+    cfgPotluckVotesChannelId :: ChannelId,
     -- | Discord channel for #potluck-signup
     cfgPotluckSignupChannelId :: ChannelId,
     -- | Port to listen on.
@@ -91,6 +93,7 @@ getConfig = do
       cfgPtrChannelId = if cfgOnFly then 1120783589928345661 else 1132714928810238062
       cfgBbeChannelId = if cfgOnFly then 1120783566889037834 else 1132714951014875246
       cfgTradeOverflowChannelId = if cfgOnFly then 1133716162308489216 else 1133555612538646629
+      cfgPotluckVotesChannelId = 1144082505704681555
       cfgPotluckSignupChannelId = 1144082624613204029
       -- Disabled for now
       cfgRoleReactionsMessageId = Nothing

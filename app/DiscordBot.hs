@@ -19,10 +19,11 @@ import Control.Concurrent.Chan (readChan, writeChan)
 import Control.Exception (try)
 import Control.Monad (forM, forM_)
 import Data.Char.WCWidth (wcwidth)
-import Data.List (nub, sortOn, transpose)
+import Data.List (nub, sortOn)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
 import Data.Maybe (catMaybes, fromMaybe, isNothing, mapMaybe)
+import Data.Ord (Down (..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -39,6 +40,7 @@ import PokeapiBridge
 import Reddit (ID (..), Post (..), getPost, runRedditT)
 import Text.Printf (printf)
 import Trans
+import Utils (makeTable)
 
 -- | Run the Discord bot.
 discordBot :: App IO ()
@@ -100,8 +102,8 @@ eventHandler e = do
           let msgText = T.strip (messageContent m)
           when ("!boost" == T.toLower msgText) (replyTo m Nothing "I'm a bot, I can't boost a server.")
           when ("!help" == T.toLower msgText) (respondHelp m)
-          when ("!potluck" == T.toLower msgText) (respondPotluck m)
-          when ("!potluck2" == T.toLower msgText) (respondPotluck2 m)
+          when ("!potluck1" == T.toLower msgText) (respondPotluckVotes m)
+          when ("!potluck2" == T.toLower msgText) (respondPotluckSignup m)
           when ("!em " `T.isPrefixOf` T.toLower msgText) (respondEM m)
           when ("!ha " `T.isPrefixOf` T.toLower msgText) (respondHA m)
           when ("!nature " `T.isPrefixOf` T.toLower msgText) (respondNature m)
@@ -365,8 +367,55 @@ respondHA m = do
               }
           )
 
-respondPotluck :: Message -> App DiscordHandler ()
-respondPotluck m = do
+respondPotluckVotes :: Message -> App DiscordHandler ()
+respondPotluckVotes m = do
+  let canonicaliseEmoji e = case emojiName e of
+        "beastball" -> Just "Bea"
+        "dreamball" -> Just "Dre"
+        "fastball" -> Just "Fas"
+        "friendball" -> Just "Fri"
+        "heavyball" -> Just "Hea"
+        "levelball" -> Just "Lev"
+        "loveball" -> Just "Lov"
+        "lureball" -> Just "Lur"
+        "moonball" -> Just "Moo"
+        "safariball" -> Just "Saf"
+        "sportball" -> Just "Spo"
+        _ -> Nothing
+  -- eyes react because this one takes a while
+  restCall_ $ DR.CreateReaction (messageChannelId m, messageId m) ":eyes:"
+  -- Fetch latest message from the #potluck-signup channel
+  cid <- asks cfgPotluckVotesChannelId
+  guildId <- asks cfgAprimarketGuildId
+  eitherMsgs <- lift $ restCall $ DR.GetChannelMessages cid (100, DR.AfterMessage 0)
+  let extractValidReactionsWithCount :: MessageReaction -> Maybe (Text, Int)
+      extractValidReactionsWithCount r = do
+        emoji <- canonicaliseEmoji . messageReactionEmoji $ r
+        pure (emoji, messageReactionCount r)
+  case eitherMsgs of
+    Left _ -> replyTo m Nothing "Could not fetch messages from #potluck-vote"
+    Right msgs -> do
+      let nonBotMsgs = filter (not . userIsBot . messageAuthor) msgs
+          emojiOrder = ["Bea", "Dre", "Fas", "Fri", "Hea", "Lev", "Lov", "Lur", "Moo", "Saf", "Spo"]
+      voteRows <- forM nonBotMsgs $ \msg ->
+        do
+          let text = messageContent msg
+          authorServerNick <- getUserNickFromMessage msg (Just guildId)
+          let msgReactions = M.fromList $ mapMaybe extractValidReactionsWithCount (messageReactions msg)
+              totalVotes = sum $ M.elems msgReactions
+              ballVotes = map (\e -> (" " <>) . T.pack . show . fromMaybe 0 . M.lookup e $ msgReactions) emojiOrder
+          pure (totalVotes, text : authorServerNick : T.pack (show totalVotes) : ballVotes)
+      let sortedVoteRows = map snd $ sortOn (Down . fst) voteRows
+          headerRow = "Pokemon" : "Proposed by" : "Total" : emojiOrder
+          table = makeTable (headerRow : sortedVoteRows) True (Just 5)
+      replyWithFile
+        m
+        ("Current status of proposals in " <> "<#" <> tshow cid <> ">:")
+        "potluck-votes.txt"
+        table
+
+respondPotluckSignup :: Message -> App DiscordHandler ()
+respondPotluckSignup m = do
   let canonicaliseEmoji e = case emojiName e of
         "\128175" -> Just ("100" :: Text)
         "beastball" -> Just "Bea"
@@ -384,9 +433,9 @@ respondPotluck m = do
   -- eyes react because this one takes a while
   restCall_ $ DR.CreateReaction (messageChannelId m, messageId m) ":eyes:"
   -- Fetch latest message from the #potluck-signup channel
-  plChannelId <- asks cfgPotluckSignupChannelId
+  plSignupChannelId <- asks cfgPotluckSignupChannelId
   guildId <- asks cfgAprimarketGuildId
-  eitherMsg <- lift $ restCall $ DR.GetChannelMessages plChannelId (1, DR.LatestMessages)
+  eitherMsg <- lift $ restCall $ DR.GetChannelMessages plSignupChannelId (1, DR.LatestMessages)
   case eitherMsg of
     Right [latestMsg] -> do
       -- Grab reactions
@@ -397,8 +446,7 @@ respondPotluck m = do
             let emoji = case emojiId e of
                   Nothing -> emojiName e -- Builtin emoji
                   Just eid -> emojiName e <> ":" <> T.pack (show eid) -- Custom emoji
-            atomically $ print emoji
-            users <- lift $ restCall $ DR.GetReactions (plChannelId, messageId latestMsg) emoji (100, DR.LatestReaction)
+            users <- lift $ restCall $ DR.GetReactions (plSignupChannelId, messageId latestMsg) emoji (100, DR.LatestReaction)
             case users of
               Right users' -> pure $ Just (simpleName, users')
               Left _ -> pure Nothing
@@ -411,20 +459,22 @@ respondPotluck m = do
         nick <- T.strip . T.filter (\c -> wcwidth c == 1) <$> getUserNick u (Just guildId)
         pure (uid, nick)
       let headerRow = "User" : M.keys reactions
-          userRow user = (userNicknames M.! userId user) : map (\k -> if user `elem` (reactions M.! k) then "x" else "") (M.keys reactions)
+          userRow user = (userNicknames M.! userId user) : map (\k -> if user `elem` (reactions M.! k) then " x " else "") (M.keys reactions)
           userRows = map userRow allUsers
-          fieldWidths = map (maximum . map T.length) (transpose (headerRow : userRows))
-          padRow row = T.justifyLeft (head fieldWidths) ' ' (head row) : zipWith (`T.center` ' ') (tail fieldWidths) (tail row)
-          tableRows = map (T.intercalate "|" . padRow) $ headerRow : userRows
-          tableWidth = T.length (head tableRows)
-          dashes = T.replicate tableWidth "-"
-          table = T.unlines $ head tableRows : dashes : intercalateEvery 5 dashes (tail tableRows)
-      replyWithFile m "Reactions to latest message in #potluck-signup" "potluck-reactions.txt" table
+          table = makeTable (headerRow : userRows) True (Just 5)
+
+      replyWithFile
+        m
+        ("Reactions to latest message in " <> "<#" <> tshow plSignupChannelId <> ">:")
+        "potluck-signups.txt"
+        table
     _ -> replyTo m Nothing "Could not get latest message from #potluck-signup"
 
 -- | Temporary function for algorithm testing
-respondPotluck2 :: Message -> App DiscordHandler ()
-respondPotluck2 m = do
+--
+-- NOT CURRENTLY USED
+_respondPotluckSignup2 :: Message -> App DiscordHandler ()
+_respondPotluckSignup2 m = do
   let canonicaliseEmoji e = case emojiName e of
         "\128175" -> Just ("100" :: Text)
         "beastball" -> Just "Bea"
@@ -453,7 +503,6 @@ respondPotluck2 m = do
             let emoji = case emojiId e of
                   Nothing -> emojiName e -- Builtin emoji
                   Just eid -> emojiName e <> ":" <> T.pack (show eid) -- Custom emoji
-            atomically $ print emoji
             users <- lift $ restCall $ DR.GetReactions (plChannelId, messageId latestMsg) emoji (100, DR.LatestReaction)
             case users of
               Right users' -> pure $ Just (simpleName, users')
@@ -837,12 +886,6 @@ getUserNick u maybeGid =
 -- | Truncate a thread title to 100 characters
 truncateThreadTitle :: Text -> Text
 truncateThreadTitle t = if T.length t > 100 then T.take 97 t <> "..." else t
-
-intercalateEvery :: Int -> a -> [a] -> [a]
-intercalateEvery n s xs =
-  case splitAt n xs of
-    (ys, []) -> ys
-    (ys, zs) -> ys ++ s : intercalateEvery n s zs
 
 replyWithFile :: Message -> Text -> Text -> Text -> App DiscordHandler ()
 replyWithFile m msgContents fname fcontents = do
