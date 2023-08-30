@@ -280,13 +280,13 @@ respondEM m = do
                     DR.messageDetailedAllowedMentions = Nothing,
                     DR.messageDetailedEmbeds =
                       if isDm
-                        then Just (take 10 $ map makeEmEmbedWithParents ems')
+                        then Just (take 8 $ map makeEmEmbedWithParents ems')
                         else Just [emEmbedShort]
                   }
               )
           -- Send a second message with the rest of the egg moves. We assume no
-          -- species has more than 20 egg moves.
-          when (length ems' > 10) $
+          -- species has more than 16 egg moves.
+          when (length ems' > 8) $
             restCall_ $
               DR.CreateMessageDetailed
                 (messageChannelId m)
@@ -296,7 +296,7 @@ respondEM m = do
                       DR.messageDetailedAllowedMentions = Nothing,
                       DR.messageDetailedEmbeds =
                         if isDm && game /= "BDSP"
-                          then Just (drop 10 $ map makeEmEmbedWithParents ems')
+                          then Just (drop 8 $ map makeEmEmbedWithParents ems')
                           else Nothing
                     }
                 )
@@ -679,8 +679,8 @@ closeThread m = do
 
 respondHelp :: Message -> App DiscordHandler ()
 respondHelp m = do
-  guild <- asks cfgAprimarketGuildId
-  chan <- asks cfgPotluckSignupChannelId
+  votesChan <- asks cfgPotluckVotesChannelId
+  signupChan <- asks cfgPotluckSignupChannelId
   replyTo m Nothing $
     T.unlines
       [ "**General commands**",
@@ -692,8 +692,10 @@ respondHelp m = do
         "  Show egg moves for a Pokémon in a game. `{game}` can be `usum`, `bdsp`, `swsh`, or `sv`. If you use this command in a DM with the bot, it will also list potential parents.",
         "- `!nature {pokemon}`",
         "  Show suggested natures for a Pokémon (collated from a couple of spreadsheets).",
-        "- `!potluck`",
-        "  Show a summary of reactions to the most recent post in https://discord.com/channels/" <> tshow guild <> "/" <> tshow chan,
+        "- `!potluck1`",
+        "  Show a summary of the proposals in <#" <> tshow votesChan <> ">.",
+        "- `!potluck2`",
+        "  Show a summary of reactions to the most recent post in <#" <> tshow signupChan <> ">.",
         "**Trading commands**",
         "- `!thread`",
         "  Reply to your trading partner in the trading forums with this to create a new thread in #thread-archive",
