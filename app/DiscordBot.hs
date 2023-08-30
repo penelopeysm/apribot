@@ -254,10 +254,6 @@ respondEM m = do
         -- Egg moves
         Right ems' -> do
           let emText = T.pack $ printf "%s egg moves in %s: %s" (speciesNameToRealName pkmn) game (T.intercalate ", " (map emName ems'))
-          let messageText =
-                if isDm
-                  then emText
-                  else emText <> "\n\nFor full details about compatible parents, use this command in a DM with me!"
           let makeEmEmbedWithParents :: EggMove -> CreateEmbed
               makeEmEmbedWithParents em' =
                 def
@@ -271,35 +267,48 @@ respondEM m = do
                     createEmbedDescription = T.intercalate "\n" (map (\e -> "**" <> emName e <> "**: " <> emFlavorText e) ems'),
                     createEmbedColor = Just DiscordColorLuminousVividPink
                   }
-          restCall_ $
-            DR.CreateMessageDetailed
-              (messageChannelId m)
-              ( def
-                  { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
-                    DR.messageDetailedContent = messageText,
-                    DR.messageDetailedAllowedMentions = Nothing,
-                    DR.messageDetailedEmbeds =
-                      if isDm
-                        then Just (take 9 $ map makeEmEmbedWithParents ems')
-                        else Just [emEmbedShort]
-                  }
-              )
-          -- Send a second message with the rest of the egg moves. We assume no
-          -- species has more than 16 egg moves.
-          when (length ems' > 9 && isDm) $
-            restCall_ $
-              DR.CreateMessageDetailed
-                (messageChannelId m)
-                ( def
-                    { DR.messageDetailedReference = Nothing,
-                      DR.messageDetailedContent = "(continued from above)",
-                      DR.messageDetailedAllowedMentions = Nothing,
-                      DR.messageDetailedEmbeds =
-                        if isDm
-                          then Just (drop 9 $ map makeEmEmbedWithParents ems')
-                          else Nothing
-                    }
-                )
+          let embeds = map makeEmEmbedWithParents ems'
+          if isDm
+            then do
+              let postSubsequentEms remainingEmbeds =
+                    case splitAt 5 remainingEmbeds of
+                      ([], []) -> pure ()
+                      (xs, ys) -> do
+                        restCall_ $
+                          DR.CreateMessageDetailed
+                            (messageChannelId m)
+                            ( def
+                                { DR.messageDetailedReference = Nothing,
+                                  DR.messageDetailedContent = "(continued from above)",
+                                  DR.messageDetailedAllowedMentions = Nothing,
+                                  DR.messageDetailedEmbeds = Just xs
+                                }
+                            )
+                        postSubsequentEms ys
+              case splitAt 5 embeds of
+                (xs, ys) -> do
+                  restCall_ $
+                    DR.CreateMessageDetailed
+                      (messageChannelId m)
+                      ( def
+                          { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
+                            DR.messageDetailedContent = emText,
+                            DR.messageDetailedAllowedMentions = Nothing,
+                            DR.messageDetailedEmbeds = Just xs
+                          }
+                      )
+                  postSubsequentEms ys
+            else
+              restCall_ $
+                DR.CreateMessageDetailed
+                  (messageChannelId m)
+                  ( def
+                      { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
+                        DR.messageDetailedContent = emText <> "\n\nFor full details about compatible parents, use this command in a DM with me!",
+                        DR.messageDetailedAllowedMentions = Nothing,
+                        DR.messageDetailedEmbeds = Just [emEmbedShort]
+                      }
+                  )
 
 respondHA :: Message -> App DiscordHandler ()
 respondHA m = do
