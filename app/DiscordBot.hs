@@ -408,12 +408,14 @@ respondPotluckVotes m = do
           emojiOrder = ["Bea", "Dre", "Fas", "Fri", "Hea", "Lev", "Lov", "Lur", "Moo", "Saf", "Spo"]
       voteRows <- forM nonBotMsgs $ \msg ->
         do
+          let pad1 n = if n < 10 then " " <> T.pack (show n) else T.pack (show n)
+          let pad2 n = if n < 100 then "  " <> T.pack (show n) else T.pack (show n)
           let text = messageContent msg
           authorServerNick <- getUserNickFromMessage msg (Just guildId)
           let msgReactions = M.fromList $ mapMaybe extractValidReactionsWithCount (messageReactions msg)
               totalVotes = sum $ M.elems msgReactions
-              ballVotes = map (\e -> (" " <>) . T.pack . show . fromMaybe 0 . M.lookup e $ msgReactions) emojiOrder
-          pure (totalVotes, text : authorServerNick : T.pack (show totalVotes) : ballVotes)
+              ballVotes = map (\e -> pad1 . fromMaybe 0 . M.lookup e $ msgReactions) emojiOrder
+          pure (totalVotes, text : authorServerNick : pad2 totalVotes : ballVotes)
       let sortedVoteRows = map snd $ sortOn (Down . fst) voteRows
           headerRow = "Pokemon" : "Proposed by" : "Total" : emojiOrder
           table = makeTable (headerRow : sortedVoteRows) True (Just 5)
