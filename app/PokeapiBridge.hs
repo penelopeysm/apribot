@@ -11,6 +11,7 @@ module PokeapiBridge
     order,
     EggMove (..),
     speciesNameToRealName,
+    getScoreFromMessage,
   )
 where
 
@@ -19,10 +20,11 @@ import Control.DeepSeq (NFData, force)
 import Control.Exception (evaluate, throwIO, try)
 import Control.Monad (forM, replicateM, (>=>))
 import Data.List (partition, sort)
-import Data.Maybe (catMaybes, mapMaybe)
+import Data.Maybe (catMaybes, mapMaybe, isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
+import Giveaway
 import Pokeapi
 import System.Random (randomRIO)
 
@@ -320,3 +322,56 @@ speciesNameToRealName t =
         . T.replace "mr-rime" "mr. Rime"
         . T.replace "flabebe" "flabébé"
         $ t'
+
+-- * For the Mew GA
+
+eqOn :: (Eq b) => (a -> b) -> a -> a -> Bool
+eqOn f a b = f a == f b
+
+getScoreOne :: Mew -> (Mew, Maybe Text) -> Int
+getScoreOne guess (truth, alreadyRevealed)
+  | isJust alreadyRevealed = 0
+  | (tera guess == tera truth) && (nature guess == nature truth) = 15
+  | otherwise =
+      let participationScore = 2
+          natureScore = case ( eqOn (natureIncreasedStat . nature) guess truth,
+                               eqOn (natureDecreasedStat . nature) guess truth
+                             ) of
+            (True, True) -> 5
+            (True, False) -> 2
+            (False, True) -> 2
+            (False, False) -> 0
+          guessTypeName = typeName $ tera guess
+          neTypes = map name . trNoDamageFrom . typeDamageRelations $ tera truth
+          halfTypes = map name . trHalfDamageFrom . typeDamageRelations $ tera truth
+          doubleTypes = map name . trDoubleDamageFrom . typeDamageRelations $ tera truth
+          typeScore
+            | guessTypeName == typeName (tera truth) = 5
+            | guessTypeName `elem` neTypes || guessTypeName `elem` halfTypes = -1
+            | guessTypeName `elem` doubleTypes = 2
+            | otherwise = 0
+       in participationScore + natureScore + typeScore
+
+getScore :: Mew -> [(Mew, Maybe Text)] -> Int
+getScore guess myMews = maximum $ map (getScoreOne guess) myMews
+
+getScoreFromMessage :: Text -> [(Mew, Maybe Text)] -> IO (Maybe (Mew, Int))
+getScoreFromMessage msg myMews = do
+  let msgWords = T.words (T.strip $ T.toLower msg)
+      natures = ["hardy", "bold", "modest", "calm", "timid", "lonely", "docile", "mild", "gentle", "hasty", "adamant", "impish", "bashful", "careful", "rash", "jolly", "naughty", "lax", "quirky", "naive", "brave", "relaxed", "quiet", "sassy", "serious"]
+      types = ["normal", "fighting", "flying", "poison", "ground", "rock", "bug", "ghost", "steel", "fire", "water", "grass", "electric", "psychic", "ice", "dragon", "dark", "fairy"]
+  case msgWords of
+    [w1, w2] ->
+      case (w1 `elem` natures, w2 `elem` types, w1 `elem` types, w2 `elem` natures) of
+        (True, True, False, False) -> do
+          mew <- getMew w2 w1
+          case mew of
+            Nothing -> pure Nothing
+            Just m -> pure $ Just (m, getScore m myMews)
+        (False, False, True, True) -> do
+          mew <- getMew w1 w2
+          case mew of
+            Nothing -> pure Nothing
+            Just m -> pure $ Just (m, getScore m myMews)
+        _ -> pure Nothing
+    _ -> pure Nothing

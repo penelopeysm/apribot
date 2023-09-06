@@ -2,10 +2,12 @@ module Config (Config (..), getConfig, NotifyEvent (..)) where
 
 import Control.Concurrent.Chan (Chan, newChan)
 import Control.Concurrent.MVar (MVar, newMVar)
-import Data.Maybe (isJust)
+import Data.IORef (IORef, newIORef)
+import Data.Maybe (isJust, catMaybes)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Discord.Types
+import Giveaway
 import Paths_apribot (getDataFileName)
 import Reddit (ID, Post)
 import System.Environment (getEnv, lookupEnv)
@@ -68,7 +70,10 @@ data Config = Config
     -- | Channel to pass posts to Discord.
     cfgChan :: Chan NotifyEvent,
     -- | Whether the app is running on Fly.io.
-    cfgOnFly :: Bool
+    cfgOnFly :: Bool,
+
+    -- | Temp variable for giveaway
+    cfgMews :: IORef [(Mew, Maybe Text)]
   }
 
 -- | App configuration.
@@ -88,6 +93,21 @@ getConfig = do
   cfgPostsDbPath <- getDataFileName "data/posts.db"
   cfgTokensDbPath <- getDataFileName "data/tokens.db"
   cfgClassifierPath <- getDataFileName "python/predict.py"
+
+  mews <- catMaybes <$> sequence
+        [ getMew "water" "naive",
+          getMew "electric" "rash",
+          getMew "bug" "calm",
+          getMew "fire" "sassy",
+          getMew "flying" "docile",
+          getMew "ghost" "hardy",
+          getMew "poison" "gentle",
+          getMew "normal" "naughty",
+          getMew "normal" "hardy",
+          getMew "fire" "lonely"
+        ]
+  let guesses = [Nothing, Just "UWorlds", Nothing, Nothing, Nothing, Nothing, Nothing, Nothing, Nothing, Nothing]
+  cfgMews <- newIORef $ zip mews guesses
 
   let cfgAprimarketGuildId = 1120782351811739689
       cfgPtrChannelId = if cfgOnFly then 1120783589928345661 else 1132714928810238062

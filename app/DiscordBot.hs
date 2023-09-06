@@ -19,10 +19,11 @@ import Control.Concurrent.Chan (readChan, writeChan)
 import Control.Exception (try)
 import Control.Monad (forM, forM_)
 import Data.Char.WCWidth (wcwidth)
+import Data.IORef (readIORef, writeIORef)
 import Data.List (nub, sortOn)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
-import Data.Maybe (catMaybes, fromMaybe, isNothing, mapMaybe)
+import Data.Maybe (catMaybes, fromMaybe, isJust, isNothing, mapMaybe)
 import Data.Ord (Down (..))
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -100,6 +101,7 @@ eventHandler e = do
         then pure ()
         else do
           let msgText = T.strip (messageContent m)
+          when (messageChannelId m == 1148998880906706956) (assessMewGAMessage m)
           when ("!boost" == T.toLower msgText) (replyTo m Nothing "I'm a bot, I can't boost a server.")
           when ("!help" == T.toLower msgText) (respondHelp m)
           when ("!potluck1" == T.toLower msgText) (respondPotluckVotes m)
@@ -111,6 +113,24 @@ eventHandler e = do
           when (any (`T.isPrefixOf` T.toLower msgText) ["!close", "[close]"]) (closeThread m)
     -- Ignore other events (for now)
     _ -> pure ()
+
+assessMewGAMessage :: Message -> App DiscordHandler ()
+assessMewGAMessage msg = do
+  myMewsRef <- asks cfgMews
+  guildId <- asks cfgAprimarketGuildId
+  myMews <- liftIO $ readIORef myMewsRef
+  result <- liftIO $ getScoreFromMessage (messageContent msg) myMews
+  case result of
+    Nothing -> restCall_ $ DR.CreateReaction (messageChannelId msg, messageId msg) ":question:"
+    Just (guessMew, score) -> do
+      case filter (\(m, n) -> guessMew == m && isJust n) myMews of
+        [(_, Just n')] -> replyTo msg Nothing ("Already guessed by " <> n')
+        _ -> do
+          replyTo msg Nothing $ "Your Mew GA score is: " <> T.pack (show score)
+          when (score == 15) $ do
+            name <- getUserNickFromMessage msg (Just guildId)
+            let myMewsUpdated = map (\(m, n) -> if m == guessMew && isNothing n then (m, Just name) else (m, n)) myMews
+            liftIO $ writeIORef myMewsRef myMewsUpdated
 
 -- | This function is exported to allow the Reddit bot to talk to this module.
 -- It adds the post to the MVar, which effectively triggers channelLoop to post

@@ -78,6 +78,7 @@ executable apribot
                       Trans,
                       Utils,
                       Web,
+                      Giveaway,
 
     -- Other library packages from which modules are imported.
     build-depends:    base,
