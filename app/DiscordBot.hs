@@ -36,12 +36,14 @@ import Discord
 import qualified Discord.Requests as DR
 import Discord.Types
 import Natures (getRecommendedNatures)
-import Pokeapi (PokeException (..))
+import Pokeapi (PokeException (..), Nature (..), Type (..))
 import PokeapiBridge
 import Reddit (ID (..), Post (..), getPost, runRedditT)
 import Text.Printf (printf)
 import Trans
 import Utils (makeTable)
+import System.Process (callProcess)
+import Giveaway
 
 -- | Run the Discord bot.
 discordBot :: App IO ()
@@ -120,17 +122,53 @@ assessMewGAMessage msg = do
   guildId <- asks cfgAprimarketGuildId
   myMews <- liftIO $ readIORef myMewsRef
   result <- liftIO $ getScoreFromMessage (messageContent msg) myMews
+
+  updateSheetPath <- asks cfgUpdateSheetPath
+  let cmid = (messageChannelId msg, messageId msg)
+  name <- getUserNickFromMessage msg (Just guildId)
   case result of
-    Nothing -> restCall_ $ DR.CreateReaction (messageChannelId msg, messageId msg) ":question:"
+    Nothing -> restCall_ $ DR.CreateReaction cmid ":question:"
     Just (guessMew, score) -> do
       case filter (\(m, n) -> guessMew == m && isJust n) myMews of
         [(_, Just n')] -> replyTo msg Nothing ("Already guessed by " <> n')
         _ -> do
-          replyTo msg Nothing $ "Your Mew GA score is: " <> T.pack (show score)
-          when (score == 15) $ do
-            name <- getUserNickFromMessage msg (Just guildId)
-            let myMewsUpdated = map (\(m, n) -> if m == guessMew && isNothing n then (m, Just name) else (m, n)) myMews
-            liftIO $ writeIORef myMewsRef myMewsUpdated
+                -- Call Python script to update gsheet
+                liftIO $ callProcess updateSheetPath [ T.unpack (natureName (nature guessMew))
+                                                     , T.unpack (typeName (tera guessMew))
+                                                     , show score
+                                                     , T.unpack name]
+                -- React accordingly
+                case score of
+                  0 -> restCall_ $ DR.CreateReaction cmid ":zero:"
+                  1 -> restCall_ $ DR.CreateReaction cmid ":one:"
+                  2 -> restCall_ $ DR.CreateReaction cmid ":two:"
+                  3 -> restCall_ $ DR.CreateReaction cmid ":three:"
+                  4 -> restCall_ $ DR.CreateReaction cmid ":four:"
+                  5 -> restCall_ $ DR.CreateReaction cmid ":five:"
+                  6 -> restCall_ $ DR.CreateReaction cmid ":six:"
+                  7 -> restCall_ $ DR.CreateReaction cmid ":seven:"
+                  8 -> restCall_ $ DR.CreateReaction cmid ":eight:"
+                  9 -> restCall_ $ DR.CreateReaction cmid ":nine:"
+                  10 -> restCall_ $ DR.CreateReaction cmid ":keycap_ten:"
+                  11 -> do
+                    restCall_ $ DR.CreateReaction cmid ":keycap_ten:"
+                    restCall_ $ DR.CreateReaction cmid ":one:"
+                  12 -> do
+                    restCall_ $ DR.CreateReaction cmid ":keycap_ten:"
+                    restCall_ $ DR.CreateReaction cmid ":two:"
+                  13 -> do
+                    restCall_ $ DR.CreateReaction cmid ":keycap_ten:"
+                    restCall_ $ DR.CreateReaction cmid ":three:"
+                  14 -> do
+                    restCall_ $ DR.CreateReaction cmid ":keycap_ten:"
+                    restCall_ $ DR.CreateReaction cmid ":four:"
+                  15 -> do
+                    restCall_ $ DR.CreateReaction cmid ":tada:"
+                    restCall_ $ DR.CreateReaction cmid ":keycap_ten:"
+                    restCall_ $ DR.CreateReaction cmid ":five:"
+                    let myMewsUpdated = map (\(m, n) -> if m == guessMew && isNothing n then (m, Just name) else (m, n)) myMews
+                    liftIO $ writeIORef myMewsRef myMewsUpdated
+                  _ -> pure ()  -- Shouldn't happen
 
 -- | This function is exported to allow the Reddit bot to talk to this module.
 -- It adds the post to the MVar, which effectively triggers channelLoop to post

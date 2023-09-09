@@ -47,6 +47,8 @@ data Config = Config
     cfgRedirectUri :: Text,
     -- | Path to the Python classifier script.
     cfgClassifierPath :: FilePath,
+    -- | Path to the Python script which updates the Mew GA sheet
+    cfgUpdateSheetPath :: FilePath,
     -- | Discord token (set via $DISCORD_TOKEN)
     cfgDiscordToken :: Text,
     -- | Discord application ID (set via $DISCORD_ID)
@@ -93,6 +95,7 @@ getConfig = do
   cfgPostsDbPath <- getDataFileName "data/posts.db"
   cfgTokensDbPath <- getDataFileName "data/tokens.db"
   cfgClassifierPath <- getDataFileName "python/predict.py"
+  cfgUpdateSheetPath <- getDataFileName "python/add_guess.py"
 
   mews <- catMaybes <$> sequence
         [ getMew "water" "naive",

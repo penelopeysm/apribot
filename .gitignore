@@ -3,3 +3,4 @@ dist-newstyle
 **/__pycache__
 python/venv
 cabal.project.local
+gspread.config
