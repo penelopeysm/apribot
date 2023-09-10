@@ -14,10 +14,10 @@
 -- where DiscordHandler is a synonym for ReaderT DiscordHandle IO.
 module DiscordBot (notifyDiscord, discordBot) where
 
-import Control.Concurrent (forkIO)
+import Control.Concurrent (forkIO, withMVar)
 import Control.Concurrent.Chan (readChan, writeChan)
 import Control.Exception (try)
-import Control.Monad (forM, forM_)
+import Control.Monad (forM, forM_, unless)
 import Data.Char.WCWidth (wcwidth)
 import Data.IORef (readIORef, writeIORef)
 import Data.List (nub, sortOn)
@@ -35,15 +35,15 @@ import Database.SQLite.Simple (withConnection)
 import Discord
 import qualified Discord.Requests as DR
 import Discord.Types
+import Giveaway
 import Natures (getRecommendedNatures)
-import Pokeapi (PokeException (..), Nature (..), Type (..))
+import Pokeapi (Nature (..), PokeException (..), Type (..))
 import PokeapiBridge
 import Reddit (ID (..), Post (..), getPost, runRedditT)
+import System.Process (callProcess)
 import Text.Printf (printf)
 import Trans
 import Utils (makeTable)
-import System.Process (callProcess)
-import Giveaway
 
 -- | Run the Discord bot.
 discordBot :: App IO ()
@@ -103,7 +103,7 @@ eventHandler e = do
         then pure ()
         else do
           let msgText = T.strip (messageContent m)
-          when (messageChannelId m == 1148998880906706956) (assessMewGAMessage m)
+          when (messageChannelId m == 1150184349539516486) (assessMewGAMessage m)
           when ("!boost" == T.toLower msgText) (replyTo m Nothing "I'm a bot, I can't boost a server.")
           when ("!help" == T.toLower msgText) (respondHelp m)
           when ("!potluck1" == T.toLower msgText) (respondPotluckVotes m)
@@ -117,58 +117,69 @@ eventHandler e = do
     _ -> pure ()
 
 assessMewGAMessage :: Message -> App DiscordHandler ()
-assessMewGAMessage msg = do
-  myMewsRef <- asks cfgMews
-  guildId <- asks cfgAprimarketGuildId
-  myMews <- liftIO $ readIORef myMewsRef
-  result <- liftIO $ getScoreFromMessage (messageContent msg) myMews
+assessMewGAMessage msg = unless (userIsBot . messageAuthor $ msg) $ do
+  lock <- asks cfgLock
+  cfg <- ask
+  hdl <- lift ask
+  liftIO $ withMVar lock $ \_ -> (`runReaderT` hdl) $ runAppWith cfg $ do
+    myMewsRef <- asks cfgMews
+    guildId <- asks cfgAprimarketGuildId
+    myMews <- liftIO $ readIORef myMewsRef
+    let winners = mapMaybe snd myMews
+    result <- liftIO $ getScoreFromMessage (messageContent msg) myMews
 
-  updateSheetPath <- asks cfgUpdateSheetPath
-  let cmid = (messageChannelId msg, messageId msg)
-  name <- getUserNickFromMessage msg (Just guildId)
-  case result of
-    Nothing -> restCall_ $ DR.CreateReaction cmid ":question:"
-    Just (guessMew, score) -> do
-      case filter (\(m, n) -> guessMew == m && isJust n) myMews of
-        [(_, Just n')] -> replyTo msg Nothing ("Already guessed by " <> n')
-        _ -> do
+    updateSheetPath <- asks cfgUpdateSheetPath
+    let cmid = (messageChannelId msg, messageId msg)
+    name <- getUserNickFromMessage msg (Just guildId)
+    unless (name == "penny (is_a_togekiss)" || name `elem` winners) $ do
+      case result of
+        Nothing -> restCall_ $ DR.CreateReaction cmid ":question:"
+        Just (guessMew, score) -> do
+          case filter (\(m, n) -> guessMew == m && isJust n) myMews of
+            [(_, Just n')] -> replyTo msg Nothing ("That's an exact match, but it was already guessed by " <> n' <> ".")
+            _ -> do
+              -- React accordingly
+              case score of
+                0 -> restCall_ $ DR.CreateReaction cmid ":zero:"
+                1 -> restCall_ $ DR.CreateReaction cmid ":one:"
+                2 -> restCall_ $ DR.CreateReaction cmid ":two:"
+                3 -> restCall_ $ DR.CreateReaction cmid ":three:"
+                4 -> restCall_ $ DR.CreateReaction cmid ":four:"
+                5 -> restCall_ $ DR.CreateReaction cmid ":five:"
+                6 -> restCall_ $ DR.CreateReaction cmid ":six:"
+                7 -> restCall_ $ DR.CreateReaction cmid ":seven:"
+                8 -> restCall_ $ DR.CreateReaction cmid ":eight:"
+                9 -> restCall_ $ DR.CreateReaction cmid ":nine:"
+                10 -> restCall_ $ DR.CreateReaction cmid ":keycap_ten:"
+                11 -> do
+                  restCall_ $ DR.CreateReaction cmid ":keycap_ten:"
+                  restCall_ $ DR.CreateReaction cmid ":one:"
+                12 -> do
+                  restCall_ $ DR.CreateReaction cmid ":keycap_ten:"
+                  restCall_ $ DR.CreateReaction cmid ":two:"
+                13 -> do
+                  restCall_ $ DR.CreateReaction cmid ":keycap_ten:"
+                  restCall_ $ DR.CreateReaction cmid ":three:"
+                14 -> do
+                  restCall_ $ DR.CreateReaction cmid ":keycap_ten:"
+                  restCall_ $ DR.CreateReaction cmid ":four:"
+                15 -> do
+                  restCall_ $ DR.CreateReaction cmid ":keycap_ten:"
+                  restCall_ $ DR.CreateReaction cmid ":five:"
+                  restCall_ $ DR.CreateReaction cmid ":tada:"
+                  let myMewsUpdated = map (\(m, n) -> if m == guessMew && isNothing n then (m, Just name) else (m, n)) myMews
+                  liftIO $ writeIORef myMewsRef myMewsUpdated
+                  replyTo msg (Just [236863453443260419]) "Congratulations! You've won a prize! cc. <@236863453443260419>"
+                _ -> pure () -- Shouldn't happen
                 -- Call Python script to update gsheet
-                liftIO $ callProcess updateSheetPath [ T.unpack (natureName (nature guessMew))
-                                                     , T.unpack (typeName (tera guessMew))
-                                                     , show score
-                                                     , T.unpack name]
-                -- React accordingly
-                case score of
-                  0 -> restCall_ $ DR.CreateReaction cmid ":zero:"
-                  1 -> restCall_ $ DR.CreateReaction cmid ":one:"
-                  2 -> restCall_ $ DR.CreateReaction cmid ":two:"
-                  3 -> restCall_ $ DR.CreateReaction cmid ":three:"
-                  4 -> restCall_ $ DR.CreateReaction cmid ":four:"
-                  5 -> restCall_ $ DR.CreateReaction cmid ":five:"
-                  6 -> restCall_ $ DR.CreateReaction cmid ":six:"
-                  7 -> restCall_ $ DR.CreateReaction cmid ":seven:"
-                  8 -> restCall_ $ DR.CreateReaction cmid ":eight:"
-                  9 -> restCall_ $ DR.CreateReaction cmid ":nine:"
-                  10 -> restCall_ $ DR.CreateReaction cmid ":keycap_ten:"
-                  11 -> do
-                    restCall_ $ DR.CreateReaction cmid ":keycap_ten:"
-                    restCall_ $ DR.CreateReaction cmid ":one:"
-                  12 -> do
-                    restCall_ $ DR.CreateReaction cmid ":keycap_ten:"
-                    restCall_ $ DR.CreateReaction cmid ":two:"
-                  13 -> do
-                    restCall_ $ DR.CreateReaction cmid ":keycap_ten:"
-                    restCall_ $ DR.CreateReaction cmid ":three:"
-                  14 -> do
-                    restCall_ $ DR.CreateReaction cmid ":keycap_ten:"
-                    restCall_ $ DR.CreateReaction cmid ":four:"
-                  15 -> do
-                    restCall_ $ DR.CreateReaction cmid ":tada:"
-                    restCall_ $ DR.CreateReaction cmid ":keycap_ten:"
-                    restCall_ $ DR.CreateReaction cmid ":five:"
-                    let myMewsUpdated = map (\(m, n) -> if m == guessMew && isNothing n then (m, Just name) else (m, n)) myMews
-                    liftIO $ writeIORef myMewsRef myMewsUpdated
-                  _ -> pure ()  -- Shouldn't happen
+              liftIO . void . forkIO $
+                callProcess
+                  updateSheetPath
+                  [ T.unpack (natureName (nature guessMew)),
+                    T.unpack (typeName (tera guessMew)),
+                    show score,
+                    T.unpack name
+                  ]
 
 -- | This function is exported to allow the Reddit bot to talk to this module.
 -- It adds the post to the MVar, which effectively triggers channelLoop to post

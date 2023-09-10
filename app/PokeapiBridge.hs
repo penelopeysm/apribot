@@ -20,7 +20,7 @@ import Control.DeepSeq (NFData, force)
 import Control.Exception (evaluate, throwIO, try)
 import Control.Monad (forM, replicateM, (>=>))
 import Data.List (partition, sort)
-import Data.Maybe (catMaybes, mapMaybe, isJust)
+import Data.Maybe (catMaybes, isJust, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
@@ -328,14 +328,71 @@ speciesNameToRealName t =
 eqOn :: (Eq b) => (a -> b) -> a -> a -> Bool
 eqOn f a b = f a == f b
 
+getIncreasedStat :: Nature -> Text
+getIncreasedStat nature = case T.toLower (natureName nature) of
+                               "hardy" -> "atk"
+                               "lonely" -> "atk"
+                               "adamant" -> "atk"
+                               "naughty" -> "atk"
+                               "brave" -> "atk"
+                               "bold" -> "def"
+                               "docile" -> "def"
+                               "impish" -> "def"
+                               "lax" -> "def"
+                               "relaxed" -> "def"
+                               "modest" -> "spa"
+                               "mild" -> "spa"
+                               "bashful" -> "spa"
+                               "rash" -> "spa"
+                               "quiet" -> "spa"
+                               "calm" -> "spd"
+                               "gentle" -> "spd"
+                               "careful" -> "spd"
+                               "quirky" -> "spd"
+                               "sassy" -> "spd"
+                               "timid" -> "spe"
+                               "hasty" -> "spe"
+                               "jolly" -> "spe"
+                               "naive" -> "spe"
+                               "serious" -> "spe"
+                               _ -> error "Invalid nature"
+
+getDecreasedStat :: Nature -> Text
+getDecreasedStat nature = case T.toLower (natureName nature) of
+                               "hardy" -> "atk"
+                               "lonely" -> "def"
+                               "adamant" -> "spa"
+                               "naughty" -> "spd"
+                               "brave" -> "spe"
+                               "bold" -> "atk"
+                               "docile" -> "def"
+                               "impish" -> "spa"
+                               "lax" -> "spd"
+                               "relaxed" -> "spe"
+                               "modest" -> "atk"
+                               "mild" -> "def"
+                               "bashful" -> "spa"
+                               "rash" -> "spd"
+                               "quiet" -> "spe"
+                               "calm" -> "atk"
+                               "gentle" -> "def"
+                               "careful" -> "spa"
+                               "quirky" -> "spd"
+                               "sassy" -> "spe"
+                               "timid" -> "atk"
+                               "hasty" -> "def"
+                               "jolly" -> "spa"
+                               "naive" -> "spd"
+                               "serious" -> "spe"
+                               _ -> error "Invalid nature"
+
 getScoreOne :: Mew -> (Mew, Maybe Text) -> Int
 getScoreOne guess (truth, alreadyRevealed)
-  | isJust alreadyRevealed = 0
-  | (tera guess == tera truth) && (nature guess == nature truth) = 15
+  | (tera guess == tera truth) && (nature guess == nature truth) = if isJust alreadyRevealed then 0 else 15
   | otherwise =
       let participationScore = 2
-          natureScore = case ( eqOn (natureIncreasedStat . nature) guess truth,
-                               eqOn (natureDecreasedStat . nature) guess truth
+          natureScore = case ( eqOn (getIncreasedStat . nature) guess truth,
+                               eqOn (getDecreasedStat . nature) guess truth
                              ) of
             (True, True) -> 5
             (True, False) -> 2
@@ -347,7 +404,7 @@ getScoreOne guess (truth, alreadyRevealed)
           doubleTypes = map name . trDoubleDamageFrom . typeDamageRelations $ tera truth
           typeScore
             | guessTypeName == typeName (tera truth) = 5
-            | guessTypeName `elem` neTypes || guessTypeName `elem` halfTypes = -1
+            | guessTypeName `elem` neTypes || guessTypeName `elem` halfTypes = -2
             | guessTypeName `elem` doubleTypes = 2
             | otherwise = 0
        in participationScore + natureScore + typeScore

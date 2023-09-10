@@ -1,17 +1,21 @@
-timid bug 9 kittykate
 quirky fairy 4 lotus
+modest psychic 4 rune
+serious dark 4 lore
+adamant steel 4 xxorn
+modest dragon 4 coldsnapper
+
+quirky psychic 6 shiro
+modest dark 6 sittingraven
+
 impish fire 7 zariu
 lax poison 7 pi
 bashful water 7 dvo
-rash electric 15 UWorlds
-modest psychic 4 rune
-serious dark 4 lore
 sassy psychic 7 kat
-naive electric 9 manual
-quirky psychic 6 shiro
-adamant steel 4 xxorn
 bold electric 7 pedro
-modest dragon 4 coldsnapper
-modest dark 6 sittingraven
 brave bug 7 theremuslupins
+
+timid bug 9 kittykate
+naive electric 9 manual
 careful fire 9 mellorine
+
+rash electric 15 UWorlds
