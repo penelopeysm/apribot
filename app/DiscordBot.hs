@@ -17,7 +17,7 @@ module DiscordBot (notifyDiscord, discordBot) where
 import Control.Concurrent (forkIO)
 import Control.Concurrent.Chan (readChan, writeChan)
 import Control.Exception (try)
-import Control.Monad (forM, forM_)
+import Control.Monad (forM, forM_, unless)
 import Data.Char.WCWidth (wcwidth)
 import Data.List (nub, sortOn)
 import Data.Map.Strict (Map)
@@ -141,7 +141,10 @@ notifyLoop = do
                     Left _ -> Nothing
             maybeMessage <-
               case T.toLower (postSubreddit post) of
-                "pokemontrades" -> notify (cfgPtrChannelId cfg)
+                "pokemontrades" ->
+                  if maybe False ("Closed" `T.isInfixOf`) (postFlairText post)
+                    then notify (cfgPtrChannelId cfg)
+                    else pure Nothing
                 "bankballexchange" -> notify (cfgBbeChannelId cfg)
                 _ -> pure Nothing
             case maybeMessage of
