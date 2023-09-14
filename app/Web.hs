@@ -146,8 +146,13 @@ navigation links = do
 
 -- * HTML that is served
 
+data WithJS = NoJS | WithJS2Sec | WithJS0p5Sec
+
+trustedUsers :: [Text]
+trustedUsers = ["is_a_togekiss", "againpedro", "JBSouls"]
+
 -- | Reusable <head> element lead element for HTML page
-headHtml :: Maybe Text -> Bool -> Html ()
+headHtml :: Maybe Text -> WithJS -> Html ()
 headHtml titleExtra withJS = do
   head_ $ do
     title_ $ toHtml (maybe "ApriBot" ("ApriBot :: " <>) titleExtra)
@@ -156,14 +161,15 @@ headHtml titleExtra withJS = do
     link_ [rel_ "icon", type_ "image/png", sizes_ "32x32", href_ "static/favicon-32x32.png"]
     link_ [rel_ "icon", type_ "image/png", sizes_ "16x16", href_ "static/favicon-16x16.png"]
     link_ [rel_ "manifest", href_ "static/site.webmanifest"]
-    if withJS
-      then script_ [src_ "static/enableButton.js", type_ "module"] ("" :: Text)
-      else mempty
+    case withJS of
+      NoJS -> mempty
+      WithJS2Sec -> script_ [src_ "static/enableButton2.js", type_ "module"] ("" :: Text)
+      WithJS0p5Sec -> script_ [src_ "static/enableButton0p5.js", type_ "module"] ("" :: Text)
 
 -- | Error HTML
 errorHtml :: Html ()
 errorHtml = doctypehtml_ $ do
-  headHtml (Just "Error") False
+  headHtml (Just "Error") NoJS
   body_ $ do
     h1_ "An error occurred :("
     p_ $ do
@@ -197,7 +203,7 @@ mainHtml = do
           td_ [class_ "post-title"] $ a_ [href_ purl] $ toHtmlRaw $ sanitizeBalance ptitle
 
   pure $ doctypehtml_ $ do
-    headHtml Nothing False
+    headHtml Nothing NoJS
     body_ $ main_ $ do
       h1_ "ApriBot"
       div_ [class_ "prose"] $ do
@@ -236,7 +242,7 @@ mainHtml = do
 
 logoutHtml :: Html ()
 logoutHtml = doctypehtml_ $ do
-  headHtml (Just "Logged out") False
+  headHtml (Just "Logged out") NoJS
   body_ $ main_ $ do
     h1_ "Logged out"
     navigation [Home, Contribute, Privacy]
@@ -244,7 +250,7 @@ logoutHtml = doctypehtml_ $ do
 
 privacyHtml :: Html ()
 privacyHtml = doctypehtml_ $ do
-  headHtml (Just "Privacy") False
+  headHtml (Just "Privacy") NoJS
   body_ $ main_ $ do
     h1_ "Privacy"
     navigation [Home, Contribute]
@@ -269,7 +275,7 @@ privacyHtml = doctypehtml_ $ do
 
 authErrorHtml :: Html ()
 authErrorHtml = doctypehtml_ $ do
-  headHtml (Just "Error") False
+  headHtml (Just "Error") NoJS
   body_ $ main_ $ do
     h1_ "Authentication error :("
     p_ $ do
@@ -279,7 +285,7 @@ authErrorHtml = doctypehtml_ $ do
 
 contribErrorHtml :: Html ()
 contribErrorHtml = doctypehtml_ $ do
-  headHtml (Just "Error") False
+  headHtml (Just "Error") NoJS
   body_ $ main_ $ do
     h1_ "Form submission error :("
     p_ $ do
@@ -294,7 +300,7 @@ contributingLoggedOutHtml' = do
       <$> getTotalRows sql
       <*> getTotalNumberLabelled sql
   pure $ doctypehtml_ $ do
-    headHtml (Just "Contributing") False
+    headHtml (Just "Contributing") NoJS
     body_ $ main_ $ do
       h1_ "Contribute"
       navigation [Home, Privacy]
@@ -332,7 +338,7 @@ contributingLoggedInHtml' username = do
       <*> getNextUnlabelledPost sql
 
   pure $ doctypehtml_ $ do
-    headHtml (Just "Contributing") True
+    headHtml (Just "Contributing") (if username `elem` trustedUsers then WithJS0p5Sec else WithJS2Sec)
     body_ $ main_ $ do
       h1_ "Contribute"
       navigation [Home, YourVotes, Privacy, Logout]
@@ -398,7 +404,7 @@ yourVotesHtml' username = do
             _ -> error "Vote that wasn't 0 or 1 found: this should not happen!"
 
   pure $ do
-    headHtml (Just "Your votes") False
+    headHtml (Just "Your votes") NoJS
     body_ $ main_ $ do
       h1_ "Your votes"
       navigation [Home, Contribute, Privacy, Logout]
@@ -470,8 +476,10 @@ web = do
       static "android-chrome-192x192.png" "image/x-png"
     ST.get "/static/android-chrome-512x512.png" $ do
       static "android-chrome-512x512.png" "image/x-png"
-    ST.get "/static/enableButton.js" $ do
-      static "enableButton.js" "text/javascript"
+    ST.get "/static/enableButton2.js" $ do
+      static "enableButton2.js" "text/javascript"
+    ST.get "/static/enableButton0p5.js" $ do
+      static "enableButton0p5.js" "text/javascript"
 
     ST.get "/" $ do
       lift mainHtml >>= serve
