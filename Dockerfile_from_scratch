@@ -9,8 +9,20 @@
 # deploy.
 
 FROM python:3.11.4-bookworm
+
 WORKDIR /
-COPY . .
+
+# Directories
+COPY ./app ./app
+COPY ./python ./python
+COPY ./static ./static
+# Files
+COPY ./apribot.cabal .
+COPY ./cabal.project .
+COPY ./cabal.project.freeze .
+
+# This line circumvents a spurious error with cabal.project's git submodule.
+# It should go away if I ever upload reddit-oauth2 to Hackage
 RUN git config --global --add safe.directory '*'
 
 # Install sqlite3
