@@ -73,7 +73,7 @@ addToDb :: Post -> Bool -> Connection -> IO ()
 addToDb post hit conn = do
   executeNamed
     conn
-    "INSERT INTO posts (id, url, title, body, submitter, hit, time, flair) \
+    "INSERT OR IGNORE INTO posts (id, url, title, body, submitter, hit, time, flair) \
     \ VALUES (:id, :url, :title, :body, :submitter, :hit, :time, :flair)"
     [ ":id" := unPostID (postId post),
       ":url" := postUrl post,
