@@ -101,7 +101,16 @@ haSpecies species = do
 
 -- | Get the hidden ability of a Pokemon. First try to resolve it as a Pokemon.
 -- If that fails, try to resolve it as a PokemonSpecies.
+--
+-- Hardcoded exceptions for new Pokemon which aren't in PokeAPI just yet.
 ha :: Text -> IO [(Text, Maybe (Text, Text))]
+ha "poltchageist" = pure [("Poltchageist", Just ("Heatproof", "The Pokémon's heatproof body halves the damage taken from Fire-type moves."))]
+ha "sinistcha" = pure [("Sinistcha", Just ("Heatproof", "The Pokémon's heatproof body halves the damage taken from Fire-type moves."))]
+ha "dipplin" = pure [("Dipplin", Just ("Sticky Hold", "The Pokémon's held items cling to its sticky body and cannot be removed by other Pokémon."))]
+ha "okidogi" = pure [("Okidogi", Just ("Guard Dog", "Boosts the Pokémon’s Attack stat if intimidated. Moves and items that would force the Pokémon to switch out also fail to work."))]
+ha "munkidori" = pure [("Munkidori", Just ("Frisk", "When it enters a battle, the Pokémon can check an opposing Pokémon's held item."))]
+ha "fezandipiti" = pure [("Fezandipiti", Just ("Technician", "Powers up weak moves so the Pokémon can deal more damage with them."))]
+ha "ogrepon" = pure [("Ogrepon", Nothing)]
 ha nm = do
   pkmn <- try $ get @Pokemon nm
   case pkmn of
@@ -276,7 +285,21 @@ getMoveFlavorText game move =
                   [] -> "(no description found)"
    in T.unwords (T.lines ft')
 
+-- | None of the new species have EMs (thankfully!). They aren't in PokeAPI yet
+-- so we have to hardcode them.
+--
+-- Mimikyu and Morpeko are also hardcoded because it's annoying to have to look
+-- up their forms.
 em :: Game -> Text -> IO [EggMove]
+em _ "poltchageist" = pure []
+em _ "sinistcha" = pure []
+em _ "dipplin" = pure []
+em _ "okidogi" = pure []
+em _ "munkidori" = pure []
+em _ "fezandipiti" = pure []
+em _ "ogrepon" = pure []
+em g "mimikyu" = em g "mimikyu-disguised"
+em g "morpeko" = em g "morpeko-full-belly"
 em game pkmn = do
   eitherPoke <- try $ get @Pokemon pkmn
   case eitherPoke of
