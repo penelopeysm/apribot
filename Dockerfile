@@ -1,12 +1,18 @@
 FROM penelopeysm/apribot:latest
-WORKDIR /
-COPY . .
 
-# This line circumvents a spurious error with cabal.project's git submodule.
-# It should go away if I ever upload reddit-oauth2 to Hackage
-RUN git config --global --add safe.directory '*'
-RUN cabal update
-RUN cabal build
+WORKDIR /
+# Directories
+COPY ./app ./app
+COPY ./python ./python
+COPY ./static ./static
+# Files
+COPY ./apribot.cabal .
+COPY ./cabal.project .
+COPY ./cabal.project.freeze .
+
+RUN git config --global --add safe.directory '*' \
+    && cabal update \
+    && cabal build
 
 CMD cabal run
 EXPOSE 8080
