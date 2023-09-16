@@ -134,19 +134,20 @@ notifyLoop = do
         case alreadyNotified of
           Just _ -> pure ()
           Nothing -> do
-            let notify chanId = do
-                  eitherMessage <- lift $ restCall $ DR.CreateMessageDetailed chanId (makeMessageDetails post)
-                  pure $ case eitherMessage of
-                    Right m -> Just m
-                    Left _ -> Nothing
-            maybeMessage <-
-              case T.toLower (postSubreddit post) of
-                "pokemontrades" ->
-                  if maybe False ("Closed" `T.isInfixOf`) (postFlairText post)
-                    then notify (cfgPtrChannelId cfg)
-                    else pure Nothing
-                "bankballexchange" -> notify (cfgBbeChannelId cfg)
-                _ -> pure Nothing
+            -- Determine which channel to post to
+            let maybeChannelId = case T.toLower (postSubreddit post) of
+                  "pokemontrades" -> case postFlairText post of
+                    Just flair -> if "Closed" `T.isInfixOf` flair then Nothing else Just (cfgPtrChannelId cfg)
+                    Nothing -> Nothing
+                  "bankballexchange" -> Just (cfgBbeChannelId cfg)
+                  _ -> Nothing
+            -- Post to the channel
+            maybeMessage <- case maybeChannelId of
+              Just cid -> do
+                eitherMessage <- lift $ restCall $ DR.CreateMessageDetailed cid (makeMessageDetails post)
+                pure $ either (const Nothing) Just eitherMessage -- convert Either a b -> Maybe b
+              Nothing -> pure Nothing
+            -- Add it to the notified posts in the DB
             case maybeMessage of
               Nothing -> pure ()
               Just msg -> do
