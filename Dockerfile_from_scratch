@@ -25,9 +25,6 @@ COPY ./cabal.project.freeze .
 # It should go away if I ever upload reddit-oauth2 to Hackage
 RUN git config --global --add safe.directory '*'
 
-# Install sqlite3
-RUN apt-get update && apt-get install -y sqlite3
-
 # Install packages
 RUN python -m pip install --upgrade pip setuptools && python -m pip install -r python/requirements.txt
 

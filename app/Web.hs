@@ -4,6 +4,7 @@ import CMarkGFM
 import Control.Applicative (liftA2)
 import Control.Exception (SomeException, try)
 import Data.List (intersperse)
+import Data.Maybe (fromMaybe)
 import Data.Password.Bcrypt
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -11,9 +12,8 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Data.Text.Lazy (fromStrict)
 import qualified Data.Text.Lazy as TL
-import Data.Time.Clock (getCurrentTime, secondsToDiffTime)
+import Data.Time.Clock (getCurrentTime, secondsToDiffTime, UTCTime (..))
 import Database
-import Database.SQLite.Simple
 import DiscordBot (notifyDiscord)
 import Lucid
 import Reddit
@@ -39,7 +39,6 @@ tokenCookieName = "apribotToken"
 retrieveRedditEnv :: ST.ActionT TL.Text (App IO) (Maybe RedditEnv)
 retrieveRedditEnv = do
   userAgent <- asks cfgUserAgent
-  tokensSql <- asks cfgTokensDbPath
   clientId <- asks cfgRedditFrontendId
   clientSecret <- asks cfgRedditFrontendSecret
 
@@ -47,7 +46,7 @@ retrieveRedditEnv = do
   case maybeCookie of
     Nothing -> pure Nothing
     Just sessionId -> do
-      maybeToken <- liftIO $ withConnection tokensSql $ getToken sessionId
+      maybeToken <- lift $ getToken sessionId
       case maybeToken of
         Nothing -> pure Nothing
         Just t -> do
@@ -58,7 +57,7 @@ retrieveRedditEnv = do
               -- If it is, refresh the token, update the database, and create a new redditEnv from it
               rt <- liftIO $ refresh clientId clientSecret userAgent t
               lift $ atomically $ T.putStrLn "refreshing token"
-              liftIO $ withConnection tokensSql $ updateToken sessionId rt
+              lift $ updateToken sessionId rt
               Just <$> liftIO (mkEnvFromToken rt userAgent)
             else -- If it's still valid, create a new redditEnv from this token
               Just <$> liftIO (mkEnvFromToken t userAgent)
@@ -71,8 +70,6 @@ retrieveRedditEnv = do
 makeNewRedditEnv :: ST.ActionT TL.Text (App IO) ()
 makeNewRedditEnv = do
   cfg <- ask
-  tokensSql <- asks cfgTokensDbPath
-
   -- Retrieve stored state from the cookie
   hashedState <- fmap PasswordHash <$> SC.getCookie hashedStateCookieName
   -- Get the authentication code and state from the URI query parameters, and
@@ -104,7 +101,7 @@ makeNewRedditEnv = do
             C.setCookieSecure = True
           }
       -- Store the token in the database using this session ID
-      liftIO $ withConnection tokensSql $ addToken sessionId t
+      lift $ addToken sessionId t
     _ -> do
       ST.redirect "auth_error"
 
@@ -112,11 +109,10 @@ makeNewRedditEnv = do
 -- exists)
 cleanup :: ST.ActionT TL.Text (App IO) ()
 cleanup = do
-  tokensSql <- asks cfgTokensDbPath
   maybeCookie <- SC.getCookie tokenCookieName
   case maybeCookie of
     Just cookie -> do
-      liftIO $ withConnection tokensSql $ removeToken cookie
+      lift $ removeToken cookie
       SC.deleteCookie tokenCookieName
       SC.deleteCookie hashedStateCookieName
     Nothing -> pure ()
@@ -180,25 +176,22 @@ errorHtml = doctypehtml_ $ do
 -- | HTML for the main page
 mainHtml :: App IO (Html ())
 mainHtml = do
-  postsSql <- asks cfgPostsDbPath
-  (hits, nonhits, n, m) <- liftIO $ withConnection postsSql $ \sql -> do
-    hits <- getLatestHits 50 sql
-    nonhits <- getLatestNonHits 50 sql
-    n <- getTotalMLAssignedRows sql
-    m <- getTotalMLAssignedHits sql
-    pure (hits, nonhits, n, m)
+  hits <- getLatestHits 50
+  nonhits <- getLatestNonHits 50
+  n <- getTotalMLAssignedRows
+  m <- getTotalMLAssignedHits
   let tblHeader :: Html ()
       tblHeader =
         tr_ $ mapM_ (th_ . toHtml) ["Post ID" :: Text, "Time (UTC)", "Submitter", "Flair", "Title"]
-  let tblRow :: (Text, Text, Text, Text, Text, Text) -> Html ()
+  let tblRow :: (Text, Text, Text, Text, UTCTime, Maybe Text) -> Html ()
       tblRow (pid, purl, ptitle, psubmitter, ptime, pflair) =
         tr_ $ do
           mapM_
             td_
             [ code_ (toHtml pid),
-              toHtml ptime,
+              toHtml (show ptime),
               toHtml ("/u/" <> psubmitter),
-              toHtml pflair
+              toHtml (fromMaybe "" pflair)
             ]
           td_ [class_ "post-title"] $ a_ [href_ purl] $ toHtmlRaw $ sanitizeBalance ptitle
 
@@ -294,11 +287,8 @@ contribErrorHtml = doctypehtml_ $ do
 
 contributingLoggedOutHtml' :: App IO (Html ())
 contributingLoggedOutHtml' = do
-  postsSql <- asks cfgPostsDbPath
-  (totalPosts, labelledPosts) <- liftIO $ withConnection postsSql $ \sql -> do
-    (,)
-      <$> getTotalRows sql
-      <*> getTotalNumberLabelled sql
+  totalPosts <- getTotalRows
+  labelledPosts <- getTotalNumberLabelled
   pure $ doctypehtml_ $ do
     headHtml (Just "Contributing") NoJS
     body_ $ main_ $ do
@@ -325,17 +315,10 @@ contributingLoggedOutHtml' = do
 
 contributingLoggedInHtml' :: Text -> App IO (Html ())
 contributingLoggedInHtml' username = do
-  postsSql <- asks cfgPostsDbPath
-  ( totalPosts,
-    labelledPosts,
-    labelledPostsByUser,
-    nextPost
-    ) <- liftIO $ withConnection postsSql $ \sql -> do
-    (,,,)
-      <$> getTotalRows sql
-      <*> getTotalNumberLabelled sql
-      <*> getNumberLabelledBy username sql
-      <*> getNextUnlabelledPost sql
+  totalPosts <- getTotalRows
+  labelledPosts <- getTotalNumberLabelled
+  labelledPostsByUser <- getNumberLabelledBy username
+  nextPost <- getNextUnlabelledPost
 
   pure $ doctypehtml_ $ do
     headHtml (Just "Contributing") (if username `elem` trustedUsers then WithJS0p5Sec else WithJS2Sec)
@@ -373,9 +356,9 @@ contributingLoggedInHtml' username = do
                   button_ [type_ "submit", name_ "vote", value_ "2", disabled_ ""] "⏭️ Skip"
             div_ $ do
               span_ [class_ "title"] $ toHtmlRaw $ sanitizeBalance postTitle
-              span_ [class_ "boxed-flair"] $ toHtml postFlair
+              span_ [class_ "boxed-flair"] $ toHtml $ fromMaybe "" postFlair
             ul_ $ do
-              li_ $ toHtml (printf "Submitted by /u/%s at %s UTC" postSubmitter postTime :: String)
+              li_ $ toHtml (printf "Submitted by /u/%s at %s UTC" postSubmitter (show postTime) :: String)
               li_ $ do
                 a_ [href_ postUrl] "Link to original Reddit post"
             if T.null (T.strip postBody)
@@ -387,11 +370,8 @@ contributingLoggedInHtml' username = do
 
 yourVotesHtml' :: Text -> App IO (Html ())
 yourVotesHtml' username = do
-  postsSql <- asks cfgPostsDbPath
-  (votes, totalLabelledByUser) <- liftIO $ withConnection postsSql $ \sql ->
-    (,)
-      <$> getLastNVotesBy 100 username sql
-      <*> getNumberLabelledBy username sql
+  votes <- getLastNVotesBy 100 username
+  totalLabelledByUser <- getNumberLabelledBy username
   let makeTableRow :: (Text, Text, Text, Text, Int) -> Html ()
       makeTableRow (postId, postTitle, postUrl, postSubmitter, vote) =
         tr_ $ do
@@ -532,7 +512,6 @@ web = do
         Just _ -> cleanup >> serve logoutHtml
 
     ST.post "/contribute" $ do
-      postsSql <- asks cfgPostsDbPath
       mPostId :: Maybe Text <- (Just <$> ST.param "id") `ST.rescue` const (pure Nothing)
       mVoter :: Maybe Text <- (Just <$> ST.param "username") `ST.rescue` const (pure Nothing)
       mVote :: Maybe Int <- (Just <$> ST.param "vote") `ST.rescue` const (pure Nothing)
@@ -541,12 +520,12 @@ web = do
           if vote /= 0 && vote /= 1
             then ST.redirect "/contribute"
             else do
-              liftIO $ withConnection postsSql $ addVote postId voter vote
-              hit <- liftIO $ withConnection postsSql $ wasHit postId
-              when (hit == 0 && vote == 1) $ lift $ do
+              lift $ addVote postId voter (vote == 1)
+              hit <- lift $ wasHit postId
+              when (not hit && vote == 1) $ lift $ do
                 atomically $ T.putStrLn ("Notifying about false negative " <> postId)
                 notifyDiscord (NotifyPostById (PostID postId))
-              when (hit == 1 && vote == 0) $ lift $ do
+              when (hit && vote == 0) $ lift $ do
                 atomically $ T.putStrLn ("Removing false positive " <> postId)
                 notifyDiscord (UnnotifyPostById (PostID postId))
               ST.redirect "/contribute"

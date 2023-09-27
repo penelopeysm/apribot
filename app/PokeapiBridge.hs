@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TypeApplications #-}
 
 module PokeapiBridge
@@ -10,127 +11,79 @@ module PokeapiBridge
     Parent (..),
     order,
     EggMove (..),
-    speciesNameToRealName,
+    getPokemonIdsAndDetails,
+    MyException (..),
   )
 where
 
-import Control.Concurrent.Async (mapConcurrently)
-import Control.DeepSeq (NFData, force)
-import Control.Exception (evaluate, throwIO, try)
-import Control.Monad (forM, replicateM, (>=>))
-import Data.List (partition, sort)
-import Data.Maybe (catMaybes, mapMaybe)
+import Control.Exception (Exception (..), throwIO)
+import Control.Monad.IO.Class (MonadIO (..))
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Database.PostgreSQL.Simple as PSQL
+import Database.PostgreSQL.Simple.SqlQQ
 import GHC.Generics (Generic)
 import Pokeapi
 import System.Random (randomRIO)
+import Trans
 
-terror :: Text -> IO a
-terror = throwIO . PokeException
+data MyException
+  = SqlException Text
+  | PokeapiException PokeException
+  deriving (Show)
 
-tshow :: (Show a) => a -> Text
-tshow = T.pack . show
+instance Exception MyException
 
--- * Hidden abilities
+sqlError :: (MonadIO m) => Text -> m a
+sqlError = liftIO . throwIO . SqlException
+
+-- * Hidden abilities (Rewritten to use PostgreSQL backend)
 
 -- | Generate a random ability.
-randomAbility :: IO (Text, Text)
+randomAbility :: (MonadIO m) => App m (Text, Text)
 randomAbility = do
-  abId :: Int <- randomRIO (1, 358)
-  abty <- get (T.pack $ show abId)
-  pure (getAbilityEngName abty, getAbilityDescription abty)
+  cfg <- ask
+  conn <- liftIO $ cfgPsqlConn cfg
+  abty <-
+    liftIO $
+      PSQL.query_
+        conn
+        [sql|SELECT name, flavor_text
+                                         FROM abilities
+                                         ORDER BY RANDOM()
+                                         LIMIT 1;|]
+  liftIO $ PSQL.close conn
+  case abty of
+    [(name, flavorText)] -> pure (name, flavorText)
+    _ -> sqlError "randomAbility: could not get random ability from database"
 
--- | Get a list of all possible abili$ties of a Pokemon. The Bool indicates
--- whether the ability is a hidden ability (True corresponds to a HA).
-getAbilitiesAndHidden :: Pokemon -> IO [(Ability, Bool)]
-getAbilitiesAndHidden pkmn = do
-  let pAbilities = pokemonAbilities pkmn
-  case pAbilities of
-    [] -> throwIO $ PokeException $ "No abilities found for Pokemon '" <> pokemonName pkmn <> "'. (This should not happen.)"
-    _ -> do
-      abilities <- mapConcurrently (resolve . paAbility) pAbilities
-      let hiddens = map paIsHidden pAbilities
-      pure $ zip abilities hiddens
-
-getAbilityDescription :: Ability -> Text
-getAbilityDescription abty =
-  let engFlavorTexts = filter ((== "en") . name . aftLanguage) (abilityFlavorTextEntries abty)
-   in -- We try to get SV > SwSh > BDSP > USUM, then fallback to whatever we can find
-      case filter ((== gameToText SV) . name . aftVersionGroup) engFlavorTexts of
-        x : _ -> aftFlavorText x
-        [] -> case filter ((== gameToText SwSh) . name . aftVersionGroup) engFlavorTexts of
-          x : _ -> aftFlavorText x
-          [] -> case filter ((== gameToText BDSP) . name . aftVersionGroup) engFlavorTexts of
-            x : _ -> aftFlavorText x
-            [] -> case filter ((== gameToText USUM) . name . aftVersionGroup) engFlavorTexts of
-              x : _ -> aftFlavorText x
-              [] -> case engFlavorTexts of
-                x : _ -> aftFlavorText x
-                [] -> ""
-
-getAbilityEngName :: Ability -> Text
-getAbilityEngName abty =
-  let engNames = filter ((== "en") . name . nameLanguage) (abilityNames abty)
-   in case engNames of
-        [] -> "**You managed to break the bot. Congratulations!**"
-        (n : _) -> nameName n
-
--- | Get the hidden ability of a Pokemon, if it exists.
-haPokemon :: Pokemon -> IO (Maybe (Text, Text))
-haPokemon pkmn = do
-  abilities' <- getAbilitiesAndHidden pkmn
-  let (ha', na') = partition snd abilities'
-  case ha' of
-    [] -> pure Nothing
-    [(a, _)] ->
-      -- Need to check that it's not a duplicate. Some Pokemon (especially in
-      -- Gen 9) have their NAs also listed as HAs. See also
-      -- https://github.com/PokeAPI/pokeapi/issues/907
-      if abilityName a `elem` map (abilityName . fst) na'
-        then pure Nothing
-        else pure $ Just (getAbilityEngName a, getAbilityDescription a)
-    _ -> terror $ "Multiple hidden abilities found for Pokemon " <> pokemonName pkmn <> ": " <> tshow ha' <> "."
-
-haSpecies :: PokemonSpecies -> IO [(Text, Maybe (Text, Text))]
-haSpecies species = do
-  forM (psVarieties species) $ \var -> do
-    pkmn <- resolve (psvPokemon var)
-    ha' <- haPokemon pkmn
-    pure (name (psvPokemon var), ha')
-
--- | Get the hidden ability of a Pokemon. First try to resolve it as a Pokemon.
--- If that fails, try to resolve it as a PokemonSpecies.
---
--- Hardcoded exceptions for new Pokemon which aren't in PokeAPI just yet.
-ha :: Text -> IO [(Text, Maybe (Text, Text))]
-ha "poltchageist" = pure [("Poltchageist", Just ("Heatproof", "The Pokémon's heatproof body halves the damage taken from Fire-type moves."))]
-ha "sinistcha" = pure [("Sinistcha", Just ("Heatproof", "The Pokémon's heatproof body halves the damage taken from Fire-type moves."))]
-ha "dipplin" = pure [("Dipplin", Just ("Sticky Hold", "The Pokémon's held items cling to its sticky body and cannot be removed by other Pokémon."))]
-ha "okidogi" = pure [("Okidogi", Just ("Guard Dog", "Boosts the Pokémon’s Attack stat if intimidated. Moves and items that would force the Pokémon to switch out also fail to work."))]
-ha "munkidori" = pure [("Munkidori", Just ("Frisk", "When it enters a battle, the Pokémon can check an opposing Pokémon's held item."))]
-ha "fezandipiti" = pure [("Fezandipiti", Just ("Technician", "Powers up weak moves so the Pokémon can deal more damage with them."))]
-ha "ogrepon" = pure [("Ogrepon", Nothing)]
-ha nm = do
-  pkmn <- try $ get @Pokemon nm
-  case pkmn of
-    Right p -> do
-      haDesc <- haPokemon p
-      pure [(pokemonName p, haDesc)]
-    Left (_ :: PokeException) -> do
-      -- No need to catch here, let exceptions bubble up
-      species <- get @PokemonSpecies nm
-      haSpecies species
+ha :: (MonadIO m) => Text -> App m [(Text, Maybe (Text, Text))]
+ha name = do
+  cfg <- ask
+  conn <- liftIO $ cfgPsqlConn cfg
+  dbHits :: [(Text, Maybe Text, Maybe Text, Maybe Text)] <-
+    liftIO $
+      PSQL.query
+        conn
+        [sql|SELECT p.name, p.form, a.name, a.flavor_text
+             FROM pokemon p LEFT OUTER JOIN abilities a
+             ON p.ha_id = a.id
+             WHERE p.unique_name ILIKE ?;|]
+        (PSQL.Only $ "%" <> name <> "%")
+  liftIO $ PSQL.close conn
+  mapM
+    ( \(pname, pform, aname, atext) -> do
+        let fullName = case pform of
+              Just form -> pname <> " (" <> form <> ")"
+              Nothing -> pname
+        case (aname, atext) of
+          (Just nm, Just tx) -> pure (fullName, Just (nm, tx))
+          (Nothing, Nothing) -> pure (fullName, Nothing)
+          _ -> sqlError $ "Invalid database entry for hidden ability " <> name <> ": " <> T.pack (show (aname, atext))
+    )
+    dbHits
 
 -- * Egg moves
-
-data Game = USUM | SwSh | BDSP | SV deriving (Eq, Ord, Show)
-
-gameToText :: Game -> Text
-gameToText USUM = "ultra-sun-ultra-moon"
-gameToText SwSh = "sword-shield"
-gameToText BDSP = "brilliant-diamond-and-shining-pearl"
-gameToText SV = "scarlet-violet"
 
 data Parent
   = LevelUpParent {lupPkmnName :: Text, lupOrder :: Int, lupLevel :: Int}
@@ -138,99 +91,12 @@ data Parent
   | BothParent {bothPkmnName :: Text, bothOrder :: Int, bothLevel :: Int}
   deriving (Eq, Ord, Show, Generic)
 
-instance NFData Parent
-
 order :: Parent -> Int
 order (LevelUpParent _ o _) = o
 order (BreedParent _ o) = o
 order (BothParent _ o _) = o
 
--- | Identify whether a given Pokemon is a compatible parent for a given egg
--- move.
-identifyParent ::
-  -- | Game we are looking in
-  Game ->
-  -- | Name of the egg move
-  Text ->
-  -- | Names of the egg groups the potential baby is in
-  [Text] ->
-  -- | URL pointing to the evolution chain of the potential baby. We use the URL
-  -- here to save on having to make another API call
-  Text ->
-  -- | The prospective parent
-  Pokemon ->
-  -- | What type of parent the Pokemon is, if at all
-  IO (Maybe Parent)
-identifyParent game moveName' eggGroupNames ecUrl' pkmn = do
-  species <- resolve (pokemonSpecies pkmn)
-  speciesEggGroups <- getEggGroups species
-  if (game /= SV && all (`notElem` eggGroupNames) speciesEggGroups) -- Wrong egg group
-    || (game /= SV && psGenderRate species == 8 && url (psEvolutionChain species) /= ecUrl') -- Female-only
-    then pure Nothing
-    else do
-      let theMove = filter (\mv -> name (pmMove mv) == moveName') (pokemonMoves pkmn)
-          name' = pokemonName pkmn
-          order' = pokemonOrder pkmn
-      pure $ case theMove of
-        [] -> Nothing -- Pokemon does not learn this move
-        [mv] ->
-          -- check if it learns via level up
-          let vgd = pmVersionGroupDetails mv
-              maybeLevelUpLevel = case filter
-                ( \pmv ->
-                    name (pmvMoveLearnMethod pmv) == "level-up"
-                      && name (pmvVersionGroup pmv) == gameToText game
-                )
-                vgd of
-                [pmv] -> Just (pmvLevelLearnedAt pmv)
-                _ -> Nothing
-              isBreedParent = case filter
-                ( \pmv ->
-                    name (pmvMoveLearnMethod pmv) == "egg"
-                      && name (pmvVersionGroup pmv) == gameToText game
-                )
-                vgd of
-                [_] -> True
-                _ -> False
-           in case (maybeLevelUpLevel, isBreedParent) of
-                (Just lvl, False) -> Just $ LevelUpParent name' order' lvl
-                (Nothing, True) -> Just $ BreedParent name' order'
-                (Just lvl, True) -> Just $ BothParent name' order' lvl
-                (Nothing, False) -> Nothing
-        _ -> Nothing -- Move was found twice in the list, shouldn't happen
-
-getParents :: Game -> Move -> [Text] -> Text -> IO [Parent]
-getParents game mv eggGroupNames ecUrl' = do
-  let learners = moveLearnedByPokemon mv
-  let getParent learner = do
-        pkmn <- resolve learner
-        identifyParent game (moveName mv) eggGroupNames ecUrl' pkmn
-  parents <- mapConcurrentlyStrict getParent learners
-  pure $ catMaybes parents
-
-getMoveEnglishName :: Move -> Maybe Text
-getMoveEnglishName move =
-  let names = moveNames move
-   in case filter (\n -> name (nameLanguage n) == "en") names of
-        [] -> Nothing
-        (n : _) -> Just (nameName n)
-
-randomMoves :: IO [(Text, Text)]
-randomMoves = do
-  allMoves <- gets @Move (Just 100000) Nothing
-  numberOfMoves :: Int <- randomRIO (2, 6)
-  -- randomly generate that number of moves
-  moveIndices :: [Int] <- replicateM numberOfMoves (randomRIO (0, length allMoves - 1))
-  moves <- mapConcurrently (\i -> resolve (allMoves !! i)) moveIndices
-  pure $
-    sort $
-      mapMaybe
-        ( \m ->
-            case getMoveEnglishName m of
-              Nothing -> Nothing
-              Just enName -> Just (enName, getMoveFlavorText SV m)
-        )
-        moves
+data Game = USUM | SwSh | BDSP | SV deriving (Eq, Ord, Show)
 
 data EggMove = EggMove
   { emName :: Text,
@@ -239,107 +105,68 @@ data EggMove = EggMove
   }
   deriving (Eq, Ord, Show)
 
-isEggMove :: Game -> PokemonMove -> Bool
-isEggMove game m =
-  let vgDetails = pmVersionGroupDetails m
-   in any
-        ( \vgd ->
-            name (pmvMoveLearnMethod vgd) == "egg"
-              && name (pmvVersionGroup vgd) == gameToText game
-        )
-        vgDetails
+-- | Generate a random set of egg moves.
+randomMoves :: (MonadIO m) => App m [(Text, Text)]
+randomMoves = do
+  cfg <- ask
+  conn <- liftIO $ cfgPsqlConn cfg
+  nMoves :: Int <- liftIO $ randomRIO (2, 6)
+  moves <-
+    liftIO $
+      PSQL.query
+        conn
+        [sql|SELECT name, flavor_text
+                                         FROM moves
+                                         ORDER BY RANDOM()
+                                         LIMIT ?;|]
+        (PSQL.Only nMoves)
+  liftIO $ PSQL.close conn
+  pure moves
 
-getEggGroups :: PokemonSpecies -> IO [Text]
-getEggGroups species =
-  if not (psIsBaby species)
-    then pure $ map name (psEggGroups species)
-    else do
-      chain <- resolve (psEvolutionChain species)
-      let evolvesTo = clSpecies . head . clEvolvesTo . ecChain $ chain
-      evolution <- resolve evolvesTo
-      pure $ map name (psEggGroups evolution)
+-- TODO: We should fix the special cases in the database
+getPokemonIdsAndDetails :: (MonadIO m) => Text -> App m [(Int, Text, Maybe Text, Text)]
+getPokemonIdsAndDetails name = do
+  let fixedName = case name of
+        "morpeko" -> "morpeko-full-belly"
+        "eiscue" -> "eiscue-ice"
+        t -> t
+  cfg <- ask
+  conn <- liftIO $ cfgPsqlConn cfg
+  exactMatches :: [(Int, Text, Maybe Text, Text)] <-
+    liftIO $
+      PSQL.query
+        conn
+        [sql|SELECT id, name, form, unique_name
+             FROM pokemon
+             WHERE unique_name ILIKE ?;|]
+        (PSQL.Only fixedName)
+  liftIO $ PSQL.close conn
+  pure exactMatches
 
-isValidMove :: MoveFlavorText -> Bool
-isValidMove mft =
-  not ("this move is forgotten" `T.isInfixOf` mftFlavorText mft)
-
-isValidMoveInGame :: Game -> MoveFlavorText -> Bool
-isValidMoveInGame g mft = name (mftVersionGroup mft) == gameToText g && isValidMove mft
-
-getMoveFlavorText :: Game -> Move -> Text
-getMoveFlavorText game move =
-  -- We try to get the game we're using > SV > SwSh > BDSP > USUM, then fallback to whatever we can find
-  let engFlavorTexts = filter ((== "en") . name . mftLanguage) (moveFlavorTextEntries move)
-      ft' = case filter (isValidMoveInGame game) engFlavorTexts of
-        x : _ -> mftFlavorText x
-        [] -> case filter (isValidMoveInGame SV) engFlavorTexts of
-          x : _ -> mftFlavorText x
-          [] -> case filter (isValidMoveInGame SwSh) engFlavorTexts of
-            x : _ -> mftFlavorText x
-            [] -> case filter (isValidMoveInGame BDSP) engFlavorTexts of
-              x : _ -> mftFlavorText x
-              [] -> case filter (isValidMoveInGame USUM) engFlavorTexts of
-                x : _ -> mftFlavorText x
-                [] -> case filter isValidMove engFlavorTexts of
-                  x : _ -> mftFlavorText x
-                  [] -> "(no description found)"
-   in T.unwords (T.lines ft')
-
--- | None of the new species have EMs (thankfully!). They aren't in PokeAPI yet
--- so we have to hardcode them.
---
--- Mimikyu and Morpeko are also hardcoded because it's annoying to have to look
--- up their forms.
-em :: Game -> Text -> IO [EggMove]
-em _ "poltchageist" = pure []
-em _ "sinistcha" = pure []
-em _ "dipplin" = pure []
-em _ "okidogi" = pure []
-em _ "munkidori" = pure []
-em _ "fezandipiti" = pure []
-em _ "ogrepon" = pure []
-em g "mimikyu" = em g "mimikyu-disguised"
-em g "morpeko" = em g "morpeko-full-belly"
-em game pkmn = do
-  eitherPoke <- try $ get @Pokemon pkmn
-  case eitherPoke of
-    Left (e :: PokeException) -> throwIO e
-    Right poke -> do
-      species <- resolve (pokemonSpecies poke)
-      eggGroupNames <- getEggGroups species
-      actualMoves <- do
-        let ems = filter (isEggMove game) (pokemonMoves poke)
-        mapM (resolve . pmMove) ems
-      let mkEggMove :: Move -> IO (Maybe EggMove)
-          mkEggMove m = do
-            case getMoveEnglishName m of
-              Just engName -> do
-                parents <- getParents game m eggGroupNames (url (psEvolutionChain species))
-                let flavorText = getMoveFlavorText game m
-                pure $ Just $ EggMove engName flavorText parents
-              Nothing -> pure Nothing
-      ems <- mapM mkEggMove actualMoves
-      pure $ sort $ catMaybes ems
-
--- * General
-
-mapConcurrentlyStrict :: (Control.DeepSeq.NFData b) => (a -> IO b) -> [a] -> IO [b]
-mapConcurrentlyStrict f = mapConcurrently (f >=> (evaluate . force))
-
-capitaliseFirst :: Text -> Text
-capitaliseFirst t = T.toUpper (T.take 1 t) <> T.drop 1 t
-
-speciesNameToRealName :: Text -> Text
-speciesNameToRealName t =
-  case t of
-    "jangmo-o" -> "Jangmo-o"
-    t' ->
-      T.intercalate "-"
-        . map capitaliseFirst
-        . T.splitOn "-"
-        . T.replace "farfetchd" "farfetch'd"
-        . T.replace "sirfetchd" "sirfetch'd"
-        . T.replace "mr-mime" "mr. Mime"
-        . T.replace "mr-rime" "mr. Rime"
-        . T.replace "flabebe" "flabébé"
-        $ t'
+-- TODO: Get parents
+em :: (MonadIO m) => Game -> Int -> App m [EggMove]
+em game pkmnId = do
+  cfg <- ask
+  conn <- liftIO $ cfgPsqlConn cfg
+  movesAndFlavorTexts :: [(Text, Text)] <-
+    liftIO $
+      PSQL.query
+        conn
+        [sql|SELECT m.name, m.flavor_text FROM learnsets as l
+                   LEFT JOIN moves as m ON l.move_id = m.id
+                   LEFT JOIN pokemon as p ON l.pokemon_id = p.id
+                   LEFT JOIN learn_methods as lm ON l.learn_method_id = lm.id
+                   LEFT JOIN games as g ON l.game_id = g.id
+                   WHERE p.id = ? AND lm.name = 'Egg' AND g.name = ?;|]
+        (pkmnId, T.pack (show game))
+  liftIO $ PSQL.close conn
+  pure $
+    map
+      ( \(moveName, flavorText) ->
+          EggMove
+            { emName = moveName,
+              emFlavorText = flavorText,
+              emParents = []
+            }
+      )
+      movesAndFlavorTexts

@@ -4,7 +4,6 @@ import Control.Concurrent.Async (concurrently)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Database
-import Database.SQLite.Simple (withConnection)
 import DiscordBot (notifyDiscord)
 import Reddit
 import System.Process (readProcess)
@@ -28,20 +27,18 @@ isHit post = do
 -- | Process newly seen posts.
 process :: Post -> RedditT (App IO) ()
 process post = do
-  postsSql <- lift $ asks cfgPostsDbPath
   case T.toLower (postSubreddit post) of
     "pokemontrades" -> do
       hit <- lift $ isHit post
-      if hit
-        then do
-          lift $ atomically $ printf "PTR Hit: %s\n%s\n%s\n" (unPostID (postId post)) (postTitle post) (postUrl post)
-          liftIO $ do
-            withConnection postsSql $ addToDb post True
-          lift $ notifyDiscord (NotifyPost post)
-        else do
-          lift $ atomically $ printf "PTR Non-hit: %s\n%s\n%s\n" (unPostID (postId post)) (postTitle post) (postUrl post)
-          liftIO $ do
-            withConnection postsSql $ addToDb post False
+      lift $
+        if hit
+          then do
+            atomically $ printf "PTR Hit: %s\n%s\n%s\n" (unPostID (postId post)) (postTitle post) (postUrl post)
+            addToDb post True
+            notifyDiscord (NotifyPost post)
+          else do
+            atomically $ printf "PTR Non-hit: %s\n%s\n%s\n" (unPostID (postId post)) (postTitle post) (postUrl post)
+            addToDb post False
     "bankballexchange" -> do
       lift $
         atomically $

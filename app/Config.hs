@@ -5,6 +5,8 @@ import Control.Concurrent.MVar (MVar, newMVar)
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
+import qualified Database.PostgreSQL.Simple as PSQL
 import Discord.Types
 import Paths_apribot (getDataFileName)
 import Reddit (ID, Post)
@@ -68,7 +70,9 @@ data Config = Config
     -- | Channel to pass posts to Discord.
     cfgChan :: Chan NotifyEvent,
     -- | Whether the app is running on Fly.io.
-    cfgOnFly :: Bool
+    cfgOnFly :: Bool,
+    -- | Function to retrieve PostgreSQL connection string
+    cfgPsqlConn :: IO PSQL.Connection
   }
 
 -- | App configuration.
@@ -106,4 +110,20 @@ getConfig = do
       cfgRedditStreamDelay = 10
   cfgLock <- newMVar ()
   cfgChan <- newChan
+
+  let cfgPsqlConn =
+        if cfgOnFly
+          then -- Production
+          do
+            maybeUrl <- lookupEnv "DATABASE_URL"
+            case maybeUrl of
+              Nothing -> error "Running on Fly.io, but DATABASE_URL not set"
+              Just url -> PSQL.connectPostgreSQL $ TE.encodeUtf8 $ T.pack url
+          else -- Local database
+          do
+            maybeUrl <- lookupEnv "FLY_PG_PROXY_CONN_STRING"
+            case maybeUrl of
+              Nothing -> error "Running locally, but FLY_PG_PROXY_CONN_STRING not set. Use `fly proxy 5432 -a apripsql`"
+              Just url -> PSQL.connectPostgreSQL $ TE.encodeUtf8 $ T.pack url
+
   pure $ Config {..}

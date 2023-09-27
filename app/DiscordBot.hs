@@ -1,5 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
-
 -- | Discord bot.
 --
 -- Note that we should actually like to implement a transformer stack like
@@ -16,8 +14,7 @@ module DiscordBot (notifyDiscord, discordBot) where
 
 import Control.Concurrent (forkIO)
 import Control.Concurrent.Chan (readChan, writeChan)
-import Control.Exception (try)
-import Control.Monad (forM, forM_, unless)
+import Control.Monad (forM, forM_)
 import Data.Char.WCWidth (wcwidth)
 import Data.List (nub, sortOn)
 import Data.Map.Strict (Map)
@@ -30,12 +27,10 @@ import qualified Data.Text.Encoding as TE
 import qualified Data.Text.IO as T
 import Data.Time.Clock.System (getSystemTime, systemSeconds)
 import Database (addNotifiedPost, checkNotifiedStatus)
-import Database.SQLite.Simple (withConnection)
 import Discord
 import qualified Discord.Requests as DR
 import Discord.Types
 import Natures (getRecommendedNatures)
-import Pokeapi (PokeException (..))
 import PokeapiBridge
 import Reddit (ID (..), Post (..), getPost, runRedditT)
 import Text.Printf (printf)
@@ -129,8 +124,7 @@ notifyLoop = do
   -- notified about
   let notifyPost :: Post -> App DiscordHandler ()
       notifyPost post = when (isNothing $ postDeleted post) $ do
-        postsSql <- asks cfgPostsDbPath
-        alreadyNotified <- liftIO $ withConnection postsSql $ checkNotifiedStatus (postId post)
+        alreadyNotified <- checkNotifiedStatus (postId post)
         case alreadyNotified of
           Just _ -> pure ()
           Nothing -> do
@@ -150,13 +144,11 @@ notifyLoop = do
             -- Add it to the notified posts in the DB
             case maybeMessage of
               Nothing -> pure ()
-              Just msg -> do
-                liftIO $ withConnection postsSql $ addNotifiedPost (postId post) (messageChannelId msg) (messageId msg)
+              Just msg -> addNotifiedPost (postId post) (messageChannelId msg) (messageId msg)
   -- Delete the post (if it's not supposed to be there)
   let unnotifyPost :: ID Post -> App DiscordHandler ()
       unnotifyPost pid = do
-        postsSql <- asks cfgPostsDbPath
-        notified <- liftIO $ withConnection postsSql $ checkNotifiedStatus pid
+        notified <- checkNotifiedStatus pid
         case notified of
           Nothing -> pure ()
           Just (chanId, msgId) -> restCall_ $ DR.DeleteMessage (chanId, msgId)
@@ -172,29 +164,29 @@ notifyLoop = do
       NotifyPost post -> notifyPost post
       UnnotifyPostById pid -> unnotifyPost pid
 
-createEmEmbedDescription :: EggMove -> Text
-createEmEmbedDescription em' =
-  let parents = sortOn order (emParents em')
-      levelUpParents =
-        case mapMaybe
-          ( \case
-              LevelUpParent nm _ lvl -> Just $ speciesNameToRealName nm <> " (" <> tshow lvl <> ")"
-              BothParent nm _ lvl -> Just $ speciesNameToRealName nm <> " (" <> tshow lvl <> ")"
-              BreedParent {} -> Nothing
-          )
-          parents of
-          [] -> []
-          xs -> ["**Parents which learn by level up**\n" <> T.intercalate ", " xs]
-      breedParents =
-        case mapMaybe
-          ( \case
-              BreedParent nm _ -> Just $ speciesNameToRealName nm
-              _ -> Nothing
-          )
-          parents of
-          [] -> []
-          xs -> ["**Parents which learn by breeding**\n" <> T.intercalate ", " xs <> " (and evolutions)"]
-   in T.intercalate "\n\n" (emFlavorText em' : levelUpParents <> breedParents)
+-- createEmEmbedDescription :: EggMove -> Text
+-- createEmEmbedDescription em' =
+--   let parents = sortOn order (emParents em')
+--       levelUpParents =
+--         case mapMaybe
+--           ( \case
+--               LevelUpParent nm _ lvl -> Just $ speciesNameToRealName nm <> " (" <> tshow lvl <> ")"
+--               BothParent nm _ lvl -> Just $ speciesNameToRealName nm <> " (" <> tshow lvl <> ")"
+--               BreedParent {} -> Nothing
+--           )
+--           parents of
+--           [] -> []
+--           xs -> ["**Parents which learn by level up**\n" <> T.intercalate ", " xs]
+--       breedParents =
+--         case mapMaybe
+--           ( \case
+--               BreedParent nm _ -> Just $ speciesNameToRealName nm
+--               _ -> Nothing
+--           )
+--           parents of
+--           [] -> []
+--           xs -> ["**Parents which learn by breeding**\n" <> T.intercalate ", " xs <> " (and evolutions)"]
+--    in T.intercalate "\n\n" (emFlavorText em' : levelUpParents <> breedParents)
 
 respondNature :: Message -> App DiscordHandler ()
 respondNature m = do
@@ -205,36 +197,36 @@ respondNature m = do
 
 respondEM :: Message -> App DiscordHandler ()
 respondEM m = do
-  channel <- lift $ restCall $ DR.GetChannel (messageChannelId m)
-  let isDm = case channel of
-        Right (ChannelDirectMessage {}) -> True
-        _ -> False
+  -- isDm <- do
+  --   channel <- lift $ restCall $ DR.GetChannel (messageChannelId m)
+  --   pure $ case channel of
+  --       Right (ChannelDirectMessage {}) -> True
+  --       _ -> False
   let msgWords = T.words . T.toLower . T.strip $ messageContent m
+  -- Parse message contents first
   result <- case msgWords of
     "!em" : "usum" : rest -> do
       let pkmn = T.intercalate "-" rest
-      ems <- liftIO $ try $ em USUM pkmn
-      pure $ Right (pkmn, "USUM" :: Text, ems)
+      pure $ Right (pkmn, USUM)
     "!em" : "swsh" : rest -> do
       let pkmn = T.intercalate "-" rest
-      ems <- liftIO $ try $ em SwSh pkmn
-      pure $ Right (pkmn, "SwSh" :: Text, ems)
+      pure $ Right (pkmn, SwSh)
     "!em" : "bdsp" : rest -> do
       let pkmn = T.intercalate "-" rest
-      ems <- liftIO $ try $ em BDSP pkmn
-      pure $ Right (pkmn, "BDSP", ems)
+      pure $ Right (pkmn, BDSP)
     "!em" : "sv" : rest -> do
       let pkmn = T.intercalate "-" rest
-      ems <- liftIO $ try $ em SV pkmn
-      pure $ Right (pkmn, "SV", ems)
-    _ -> pure $ Left "usage: `!em game pokemon` (game is usum, bdsp, swsh, or sv). e.g. `!em swsh togepi`"
+      pure $ Right (pkmn, SV)
+    _ -> pure $ Left ()
   case result of
-    Left err -> replyTo m Nothing err
-    Right (pkmn, game, ems) -> do
-      case ems of
-        -- Not a Pokemon
-        Left (_ :: PokeException) -> do
-          moveDescs <- liftIO randomMoves
+    -- If message contents don't make sense, reply with usage
+    Left _ -> replyTo m Nothing "usage: `!em game pokemon` (game is usum, bdsp, swsh, or sv). e.g. `!em swsh togepi`"
+    Right (pkmn, game) -> do
+      -- Try to fetch the Pokemon first
+      pkmnDetails <- getPokemonIdsAndDetails pkmn
+      case pkmnDetails of
+        [] -> do
+          moveDescs <- randomMoves
           let messageText = "I don't think " <> pkmn <> " is a Pokemon, but if it was, it would have the egg moves: " <> T.intercalate ", " (map fst moveDescs) <> "!"
           let embed =
                 def
@@ -252,67 +244,73 @@ respondEM m = do
                     DR.messageDetailedEmbeds = Just [embed]
                   }
               )
-        -- No egg moves
-        Right [] ->
-          replyTo m Nothing . T.pack $ printf "%s has no egg moves in %s" (speciesNameToRealName pkmn) game
-        -- Egg moves
-        Right ems' -> do
-          let emText = T.pack $ printf "%s egg moves in %s: %s" (speciesNameToRealName pkmn) game (T.intercalate ", " (map emName ems'))
-          let makeEmEmbedWithParents :: EggMove -> CreateEmbed
-              makeEmEmbedWithParents em' =
-                def
-                  { createEmbedTitle = emName em',
-                    createEmbedDescription = createEmEmbedDescription em',
-                    createEmbedColor = Just DiscordColorLuminousVividPink
-                  }
-          let emEmbedShort =
-                def
-                  { createEmbedTitle = "Descriptions",
-                    createEmbedDescription = T.intercalate "\n" (map (\e -> "**" <> emName e <> "**: " <> emFlavorText e) ems'),
-                    createEmbedColor = Just DiscordColorLuminousVividPink
-                  }
-          let embeds = map makeEmEmbedWithParents ems'
-          if isDm
-            then do
-              let postSubsequentEms remainingEmbeds =
-                    case splitAt 5 remainingEmbeds of
-                      ([], []) -> pure ()
-                      (xs, ys) -> do
-                        restCall_ $
-                          DR.CreateMessageDetailed
-                            (messageChannelId m)
-                            ( def
-                                { DR.messageDetailedReference = Nothing,
-                                  DR.messageDetailedContent = "(continued from above)",
-                                  DR.messageDetailedAllowedMentions = Nothing,
-                                  DR.messageDetailedEmbeds = Just xs
-                                }
-                            )
-                        postSubsequentEms ys
-              case splitAt 5 embeds of
-                (xs, ys) -> do
-                  restCall_ $
-                    DR.CreateMessageDetailed
-                      (messageChannelId m)
-                      ( def
-                          { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
-                            DR.messageDetailedContent = emText,
-                            DR.messageDetailedAllowedMentions = Nothing,
-                            DR.messageDetailedEmbeds = Just xs
-                          }
-                      )
-                  postSubsequentEms ys
-            else
+        -- One exact match found
+        [(id', name, form, _)] -> do
+          let fullName = name <> maybe "" (\f -> " (" <> f <> ")") form
+          ems <- em game id'
+          case ems of
+            -- No egg moves
+            [] ->
+              replyTo m Nothing . T.pack $ printf "%s has no egg moves in %s" fullName (show game)
+            -- Egg moves
+            ems' -> do
+              let emText = T.pack $ printf "%s egg moves in %s: %s" fullName (show game) (T.intercalate ", " (map emName ems'))
+              let emEmbedShort =
+                    def
+                      { createEmbedTitle = "Descriptions",
+                        createEmbedDescription = T.intercalate "\n" (map (\e -> "**" <> emName e <> "**: " <> emFlavorText e) ems'),
+                        createEmbedColor = Just DiscordColorLuminousVividPink
+                      }
               restCall_ $
                 DR.CreateMessageDetailed
                   (messageChannelId m)
                   ( def
                       { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
-                        DR.messageDetailedContent = emText <> "\n\nFor full details about compatible parents, use this command in a DM with me!",
+                        DR.messageDetailedContent = emText <> "\n\nApribot's EM functionality is currently undergoing a bit of an overhaul. Compatible parents aren't available right now, but will be back soon; please bear with me! Also, if you notice any errors, please let Penny know. Thank you!",
                         DR.messageDetailedAllowedMentions = Nothing,
                         DR.messageDetailedEmbeds = Just [emEmbedShort]
                       }
                   )
+        _ -> replyTo m Nothing "found multiple matches: this should not happen, please let Penny know"
+
+              -- if isDm then do
+              --   let makeEmEmbedWithParents :: EggMove -> CreateEmbed
+              --       makeEmEmbedWithParents em' =
+              --         def
+              --           { createEmbedTitle = emName em',
+              --             createEmbedDescription = createEmEmbedDescription em',
+              --             createEmbedColor = Just DiscordColorLuminousVividPink
+              --           }
+              --   let embeds = map makeEmEmbedWithParents ems'
+              --     then do
+              --       let postSubsequentEms remainingEmbeds =
+              --             case splitAt 5 remainingEmbeds of
+              --               ([], []) -> pure ()
+              --               (xs, ys) -> do
+              --                 restCall_ $
+              --                   DR.CreateMessageDetailed
+              --                     (messageChannelId m)
+              --                     ( def
+              --                         { DR.messageDetailedReference = Nothing,
+              --                           DR.messageDetailedContent = "(continued from above)",
+              --                           DR.messageDetailedAllowedMentions = Nothing,
+              --                           DR.messageDetailedEmbeds = Just xs
+              --                         }
+              --                     )
+              --                 postSubsequentEms ys
+              --       case splitAt 5 embeds of
+              --         (xs, ys) -> do
+              --           restCall_ $
+              --             DR.CreateMessageDetailed
+              --               (messageChannelId m)
+              --               ( def
+              --                   { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
+              --                     DR.messageDetailedContent = emText,
+              --                     DR.messageDetailedAllowedMentions = Nothing,
+              --                     DR.messageDetailedEmbeds = Just xs
+              --                   }
+              --               )
+              --           postSubsequentEms ys
 
 respondHA :: Message -> App DiscordHandler ()
 respondHA m = do
@@ -333,11 +331,12 @@ respondHA m = do
                       <> "_(Ability)",
                   createEmbedColor = Just DiscordColorLuminousVividPink
                 }
-  haDetails <- atomically $ liftIO $ try $ ha (T.intercalate "-" . T.words $ pkmn)
+  haDetails <- ha (T.intercalate "-" . T.words $ pkmn)
   case haDetails of
     -- Not a Pokemon
-    Left (_ :: PokeException) -> do
-      (ha', desc') <- liftIO randomAbility
+    [] -> do
+      (ha', desc') <- randomAbility
+      atomically $ print ha'
       restCall_ $
         DR.CreateMessageDetailed
           (messageChannelId m)
@@ -349,23 +348,23 @@ respondHA m = do
               }
           )
     -- One species that has a HA
-    Right [(name, Just (ha', desc'))] ->
+    [(name, Just (ha', desc'))] ->
       restCall_ $
         DR.CreateMessageDetailed
           (messageChannelId m)
           ( def
               { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
-                DR.messageDetailedContent = speciesNameToRealName name <> "'s hidden ability is: " <> ha',
+                DR.messageDetailedContent = name <> "'s hidden ability is: " <> ha',
                 DR.messageDetailedAllowedMentions = Nothing,
                 DR.messageDetailedEmbeds = (: []) <$> makeEmbed (ha', desc')
               }
           )
     -- One species with no HA
-    Right [(name, Nothing)] -> replyTo m Nothing $ name <> " has no hidden ability"
+    [(name, Nothing)] -> replyTo m Nothing $ name <> " has no hidden ability"
     -- Multiple species
-    Right species -> do
-      let makeText (name, Nothing) = speciesNameToRealName name <> " has no hidden ability"
-          makeText (name, Just (ha', _)) = speciesNameToRealName name <> "'s hidden ability is: " <> ha'
+    species -> do
+      let makeText (name, Nothing) = name <> " has no hidden ability"
+          makeText (name, Just (ha', _)) = name <> "'s hidden ability is: " <> ha'
           messageText = T.intercalate "\n" (map makeText species)
           uniqueHAs = nub $ mapMaybe snd species
           embeds = mapMaybe makeEmbed uniqueHAs

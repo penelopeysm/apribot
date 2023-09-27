@@ -6,10 +6,6 @@
 app = "apribot"
 primary_region = "lhr"
 
-[[mounts]]
-  source = "apribot_data"
-  destination = "/data"
-
 [http_service]
   internal_port = 8080
   force_https = true
