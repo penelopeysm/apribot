@@ -23,13 +23,11 @@ import qualified Data.Text as T
 import qualified Database.PostgreSQL.Simple as PSQL
 import Database.PostgreSQL.Simple.SqlQQ
 import GHC.Generics (Generic)
-import Pokeapi
 import System.Random (randomRIO)
 import Trans
 
 data MyException
   = SqlException Text
-  | PokeapiException PokeException
   deriving (Show)
 
 instance Exception MyException
