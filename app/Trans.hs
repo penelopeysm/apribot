@@ -11,6 +11,7 @@ module Trans
     atomically,
     atomicallyWith,
     authenticateAsOwner,
+    withAppPsqlConn,
     Control.Monad.IO.Class.liftIO,
     Control.Monad.Reader.ask,
     Control.Monad.Reader.asks,
@@ -27,6 +28,7 @@ import Control.Concurrent (MVar, withMVar)
 import Control.Monad (forever, void, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Reader (MonadReader, MonadTrans, ReaderT, ask, asks, lift, runReaderT)
+import Database.PostgreSQL.Simple (close, Connection)
 import Reddit (Credentials (..), RedditEnv, authenticate)
 
 newtype App m a = App {unApp :: ReaderT Config m a}
@@ -66,3 +68,11 @@ authenticateAsOwner = do
   ownerClientSecret <- asks cfgRedditSecret
   userAgent <- asks cfgUserAgent
   liftIO $ authenticate OwnerCredentials {..} userAgent
+
+withAppPsqlConn :: (MonadIO m) => (Connection -> IO a) -> App m a
+withAppPsqlConn action = do
+  cfg <- ask
+  conn <- liftIO $ cfgPsqlConn cfg
+  result <- liftIO $ action conn
+  liftIO $ close conn
+  pure result

@@ -372,16 +372,13 @@ yourVotesHtml' :: Text -> App IO (Html ())
 yourVotesHtml' username = do
   votes <- getLastNVotesBy 100 username
   totalLabelledByUser <- getNumberLabelledBy username
-  let makeTableRow :: (Text, Text, Text, Text, Int) -> Html ()
+  let makeTableRow :: (Text, Text, Text, Text, Bool) -> Html ()
       makeTableRow (postId, postTitle, postUrl, postSubmitter, vote) =
         tr_ $ do
           td_ $ code_ $ toHtml postId
           td_ $ a_ [href_ postUrl] (toHtmlRaw $ sanitizeBalance postTitle)
           td_ $ toHtml $ "/u/" <> postSubmitter
-          td_ $ case vote of
-            1 -> "Yes"
-            0 -> "No"
-            _ -> error "Vote that wasn't 0 or 1 found: this should not happen!"
+          td_ $ if vote then "Yes" else "No"
 
   pure $ do
     headHtml (Just "Your votes") NoJS

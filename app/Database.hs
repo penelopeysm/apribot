@@ -64,14 +64,6 @@ import Reddit
 import Reddit.Auth (Token (..), parseScopes, showScopes)
 import Trans
 
-withAppPsqlConn :: (MonadIO m) => (Connection -> IO a) -> App m a
-withAppPsqlConn action = do
-  cfg <- ask
-  conn <- liftIO $ cfgPsqlConn cfg
-  result <- liftIO $ action conn
-  liftIO $ close conn
-  pure result
-
 -- | Add a post to the `posts` table. The Bool parameter indicates whether it
 -- was a hit or not.
 addToDb :: (MonadIO m) => Post -> Bool -> App m ()
@@ -81,7 +73,7 @@ addToDb post hit = withAppPsqlConn $ \conn ->
       conn
       [sql|INSERT INTO posts (id, url, title, body, submitter, utc_time, flair, hit)
        VALUES (?,?,?,?,?,?,?,?)
-       ON CONFLICT (id) IGNORE;|]
+       ON CONFLICT (id) DO NOTHING;|]
       ( unPostID (postId post),
         postUrl post,
         postTitle post,
@@ -177,7 +169,7 @@ getNumVotes = withAppPsqlConn $ \conn -> do
 
 -- | Get the most recent @count@ votes by a given user. Returned in descending
 -- order of time, i.e. most recent votes first.
-getLastNVotesBy :: (MonadIO m) => Int -> Text -> App m [(Text, Text, Text, Text, Int)]
+getLastNVotesBy :: (MonadIO m) => Int -> Text -> App m [(Text, Text, Text, Text, Bool)]
 getLastNVotesBy count username = withAppPsqlConn $ \conn -> do
   query
     conn
@@ -242,21 +234,14 @@ addToken identifier tkn = withAppPsqlConn $ \conn -> do
       conn
       [sql|INSERT INTO tokens (id, token, token_type, expires_at, scopes, refresh_token)
          VALUES (?,?,?,?,?,?)
-         ON CONFLICT(id) DO
-         UPDATE SET token = ?, token_type = ?, expires_at = ?, scopes = ?, refresh_token = ?
-         WHERE id = ?;|]
+         ON CONFLICT(id)
+         DO UPDATE SET token = EXCLUDED.token, token_type = EXCLUDED.token_type, expires_at = EXCLUDED.expires_at, scopes = EXCLUDED.scopes, refresh_token = EXCLUDED.refresh_token;|]
       ( identifier,
         token,
         tokenType,
         expiresAt,
         scopes,
-        refreshToken,
-        token,
-        tokenType,
-        expiresAt,
-        scopes,
-        refreshToken,
-        identifier
+        refreshToken
       )
 
 getToken :: (MonadIO m) => Text -> App m (Maybe Token)

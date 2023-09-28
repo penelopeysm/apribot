@@ -31,7 +31,7 @@ import Discord
 import qualified Discord.Requests as DR
 import Discord.Types
 import Natures (getRecommendedNatures)
-import PokeapiBridge
+import Pokemon
 import Reddit (ID (..), Post (..), getPost, runRedditT)
 import Text.Printf (printf)
 import Trans
@@ -164,29 +164,27 @@ notifyLoop = do
       NotifyPost post -> notifyPost post
       UnnotifyPostById pid -> unnotifyPost pid
 
--- createEmEmbedDescription :: EggMove -> Text
--- createEmEmbedDescription em' =
---   let parents = sortOn order (emParents em')
---       levelUpParents =
---         case mapMaybe
---           ( \case
---               LevelUpParent nm _ lvl -> Just $ speciesNameToRealName nm <> " (" <> tshow lvl <> ")"
---               BothParent nm _ lvl -> Just $ speciesNameToRealName nm <> " (" <> tshow lvl <> ")"
---               BreedParent {} -> Nothing
---           )
---           parents of
---           [] -> []
---           xs -> ["**Parents which learn by level up**\n" <> T.intercalate ", " xs]
---       breedParents =
---         case mapMaybe
---           ( \case
---               BreedParent nm _ -> Just $ speciesNameToRealName nm
---               _ -> Nothing
---           )
---           parents of
---           [] -> []
---           xs -> ["**Parents which learn by breeding**\n" <> T.intercalate ", " xs <> " (and evolutions)"]
---    in T.intercalate "\n\n" (emFlavorText em' : levelUpParents <> breedParents)
+createEmEmbedDescription :: EggMoveWithParents -> Text
+createEmEmbedDescription em' =
+  let levelUpParents =
+        case mapMaybe
+          ( \case
+              LevelUpParent nm lvl -> Just $ nm <> " (" <> tshow lvl <> ")"
+              BreedParent {} -> Nothing
+          )
+          (emwpParents em') of
+          [] -> []
+          xs -> ["**Parents which learn by level up**\n" <> T.intercalate ", " xs]
+      breedParents =
+        case mapMaybe
+          ( \case
+              BreedParent nm -> Just nm
+              _ -> Nothing
+          )
+          (emwpParents em') of
+          [] -> []
+          xs -> ["**Parents which learn by breeding**\n" <> T.intercalate ", " xs]
+   in T.intercalate "\n\n" (emwpFlavorText em' : levelUpParents <> breedParents)
 
 respondNature :: Message -> App DiscordHandler ()
 respondNature m = do
@@ -197,11 +195,6 @@ respondNature m = do
 
 respondEM :: Message -> App DiscordHandler ()
 respondEM m = do
-  -- isDm <- do
-  --   channel <- lift $ restCall $ DR.GetChannel (messageChannelId m)
-  --   pure $ case channel of
-  --       Right (ChannelDirectMessage {}) -> True
-  --       _ -> False
   let msgWords = T.words . T.toLower . T.strip $ messageContent m
   -- Parse message contents first
   result <- case msgWords of
@@ -222,7 +215,7 @@ respondEM m = do
     -- If message contents don't make sense, reply with usage
     Left _ -> replyTo m Nothing "usage: `!em game pokemon` (game is usum, bdsp, swsh, or sv). e.g. `!em swsh togepi`"
     Right (pkmn, game) -> do
-      -- Try to fetch the Pokemon first
+      -- Try to fetch the Pokemon first. If it can't be found, choose some random moves
       pkmnDetails <- getPokemonIdsAndDetails pkmn
       case pkmnDetails of
         [] -> do
@@ -244,73 +237,93 @@ respondEM m = do
                     DR.messageDetailedEmbeds = Just [embed]
                   }
               )
-        -- One exact match found
+        -- One exact match found. Calculate egg moves
         [(id', name, form, _)] -> do
           let fullName = name <> maybe "" (\f -> " (" <> f <> ")") form
-          ems <- em game id'
-          case ems of
-            -- No egg moves
-            [] ->
-              replyTo m Nothing . T.pack $ printf "%s has no egg moves in %s" fullName (show game)
-            -- Egg moves
-            ems' -> do
-              let emText = T.pack $ printf "%s egg moves in %s: %s" fullName (show game) (T.intercalate ", " (map emName ems'))
-              let emEmbedShort =
-                    def
-                      { createEmbedTitle = "Descriptions",
-                        createEmbedDescription = T.intercalate "\n" (map (\e -> "**" <> emName e <> "**: " <> emFlavorText e) ems'),
-                        createEmbedColor = Just DiscordColorLuminousVividPink
-                      }
-              restCall_ $
-                DR.CreateMessageDetailed
-                  (messageChannelId m)
-                  ( def
-                      { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
-                        DR.messageDetailedContent = emText <> "\n\nApribot's EM functionality is currently undergoing a bit of an overhaul. Compatible parents aren't available right now, but will be back soon; please bear with me! Also, if you notice any errors, please let Penny know. Thank you!",
-                        DR.messageDetailedAllowedMentions = Nothing,
-                        DR.messageDetailedEmbeds = Just [emEmbedShort]
-                      }
-                  )
-        _ -> replyTo m Nothing "found multiple matches: this should not happen, please let Penny know"
+          -- Check if the message is in a DM
+          channel <- lift $ restCall $ DR.GetChannel (messageChannelId m)
+          let isDm = case channel of
+                Right (ChannelDirectMessage {}) -> True
+                _ -> False
+          -- If it is, respond in the DM
+          if isDm
+            then do
+              ems <- getEmsWithParents game id'
+              case ems of
+                -- No egg moves
+                [] ->
+                  replyTo m Nothing . T.pack $ printf "%s has no egg moves in %s" fullName (show game)
+                -- Egg moves
+                ems' -> do
+                      let makeEmEmbedWithParents :: EggMoveWithParents -> CreateEmbed
+                          makeEmEmbedWithParents em' =
+                            def
+                              { createEmbedTitle = emwpName em',
+                                createEmbedDescription = createEmEmbedDescription em',
+                                createEmbedColor = Just DiscordColorLuminousVividPink
+                              }
+                      let emText = T.pack $ printf "%s egg moves in %s: %s" fullName (show game) (T.intercalate ", " (map emwpName ems'))
+                      let embeds = map makeEmEmbedWithParents ems'
+                      let postSubsequentEms remainingEmbeds =
+                            case splitAt 5 remainingEmbeds of
+                              ([], []) -> pure ()
+                              (xs, ys) -> do
+                                restCall_ $
+                                  DR.CreateMessageDetailed
+                                    (messageChannelId m)
+                                    ( def
+                                        { DR.messageDetailedReference = Nothing,
+                                          DR.messageDetailedContent = "",
+                                          DR.messageDetailedAllowedMentions = Nothing,
+                                          DR.messageDetailedEmbeds = Just xs
+                                        }
+                                    )
+                                postSubsequentEms ys
+                      case splitAt 5 embeds of
+                        (xs, ys) -> do
+                          restCall_ $
+                            DR.CreateMessageDetailed
+                              (messageChannelId m)
+                              ( def
+                                  { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
+                                    DR.messageDetailedContent = emText,
+                                    DR.messageDetailedAllowedMentions = Nothing,
+                                    DR.messageDetailedEmbeds = Just xs
+                                  }
+                              )
+                          postSubsequentEms ys
+                      restCall_ $
+                        DR.CreateMessage
+                          (messageChannelId m)
+                          "(Note from Penny: Apribot's EM functionality recently underwent a major overhaul. The egg moves themselves should all be correct, but I'm not 100% sure about the parents. If you find any mistakes, please let me know. Thank you!)"
 
-              -- if isDm then do
-              --   let makeEmEmbedWithParents :: EggMove -> CreateEmbed
-              --       makeEmEmbedWithParents em' =
-              --         def
-              --           { createEmbedTitle = emName em',
-              --             createEmbedDescription = createEmEmbedDescription em',
-              --             createEmbedColor = Just DiscordColorLuminousVividPink
-              --           }
-              --   let embeds = map makeEmEmbedWithParents ems'
-              --     then do
-              --       let postSubsequentEms remainingEmbeds =
-              --             case splitAt 5 remainingEmbeds of
-              --               ([], []) -> pure ()
-              --               (xs, ys) -> do
-              --                 restCall_ $
-              --                   DR.CreateMessageDetailed
-              --                     (messageChannelId m)
-              --                     ( def
-              --                         { DR.messageDetailedReference = Nothing,
-              --                           DR.messageDetailedContent = "(continued from above)",
-              --                           DR.messageDetailedAllowedMentions = Nothing,
-              --                           DR.messageDetailedEmbeds = Just xs
-              --                         }
-              --                     )
-              --                 postSubsequentEms ys
-              --       case splitAt 5 embeds of
-              --         (xs, ys) -> do
-              --           restCall_ $
-              --             DR.CreateMessageDetailed
-              --               (messageChannelId m)
-              --               ( def
-              --                   { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
-              --                     DR.messageDetailedContent = emText,
-              --                     DR.messageDetailedAllowedMentions = Nothing,
-              --                     DR.messageDetailedEmbeds = Just xs
-              --                   }
-              --               )
-              --           postSubsequentEms ys
+            else do
+              -- Not in DMs
+              ems <- getEmsNoParents game id'
+              case ems of
+                -- No egg moves
+                [] ->
+                  replyTo m Nothing . T.pack $ printf "%s has no egg moves in %s" fullName (show game)
+                -- Egg moves
+                ems' -> do
+                  let emText = T.pack $ printf "%s egg moves in %s: %s" fullName (show game) (T.intercalate ", " (map emnpName ems'))
+                  let emEmbedShort =
+                        def
+                          { createEmbedTitle = "Descriptions",
+                            createEmbedDescription = T.intercalate "\n" (map (\e -> "**" <> emnpName e <> "**: " <> emnpFlavorText e) ems'),
+                            createEmbedColor = Just DiscordColorLuminousVividPink
+                          }
+                  restCall_ $
+                    DR.CreateMessageDetailed
+                      (messageChannelId m)
+                      ( def
+                          { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
+                            DR.messageDetailedContent = emText,
+                            DR.messageDetailedAllowedMentions = Nothing,
+                            DR.messageDetailedEmbeds = Just [emEmbedShort]
+                          }
+                      )
+        _ -> replyTo m Nothing "found multiple matches: this should not happen, please let Penny know"
 
 respondHA :: Message -> App DiscordHandler ()
 respondHA m = do

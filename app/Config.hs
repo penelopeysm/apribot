@@ -19,11 +19,7 @@ data NotifyEvent
   deriving (Show)
 
 data Config = Config
-  { -- | Path to the posts.db SQLite database file.
-    cfgPostsDbPath :: FilePath,
-    -- | Path to the tokens.db SQLite database file.
-    cfgTokensDbPath :: FilePath,
-    -- | Path to web app static directory
+  { -- | Path to web app static directory
     cfgStaticDir :: FilePath,
     -- | Guild id
     cfgAprimarketGuildId :: GuildId,
@@ -89,8 +85,6 @@ getConfig = do
   cfgRedditPassword <- T.pack <$> getEnv "REDDIT_PASSWORD"
   cfgStaticDir <- getDataFileName "static"
 
-  cfgPostsDbPath <- getDataFileName "data/posts.db"
-  cfgTokensDbPath <- getDataFileName "data/tokens.db"
   cfgClassifierPath <- getDataFileName "python/predict.py"
 
   let cfgAprimarketGuildId = 1120782351811739689
