@@ -139,7 +139,11 @@ notifyLoop = do
             maybeMessage <- case maybeChannelId of
               Just cid -> do
                 eitherMessage <- lift $ restCall $ DR.CreateMessageDetailed cid (makeMessageDetails post)
-                pure $ either (const Nothing) Just eitherMessage -- convert Either a b -> Maybe b
+                case eitherMessage of
+                  Left err -> do
+                    tellError err "notifyPost:1"
+                    pure Nothing
+                  Right msg -> pure (Just msg)
               Nothing -> pure Nothing
             -- Add it to the notified posts in the DB
             case maybeMessage of
@@ -151,7 +155,11 @@ notifyLoop = do
         notified <- checkNotifiedStatus pid
         case notified of
           Nothing -> pure ()
-          Just (chanId, msgId) -> restCall_ $ DR.DeleteMessage (chanId, msgId)
+          Just (chanId, msgId) -> do
+            eitherDeleted <- lift $ restCall $ DR.DeleteMessage (chanId, msgId)
+            case eitherDeleted of
+              Left err -> tellError err "notifyPost:2"
+              Right _ -> pure ()
   -- Loop
   let chan = cfgChan cfg
   forever $ do
@@ -170,6 +178,7 @@ createEmEmbedDescription em' =
         case mapMaybe
           ( \case
               LevelUpParent nm lvl -> Just $ nm <> " (" <> tshow lvl <> ")"
+              EvolutionParent nm -> Just $ nm <> " (evolution)"
               BreedParent {} -> Nothing
           )
           (emwpParents em') of
@@ -255,48 +264,47 @@ respondEM m = do
                   replyTo m Nothing . T.pack $ printf "%s has no egg moves in %s" fullName (show game)
                 -- Egg moves
                 ems' -> do
-                      let makeEmEmbedWithParents :: EggMoveWithParents -> CreateEmbed
-                          makeEmEmbedWithParents em' =
-                            def
-                              { createEmbedTitle = emwpName em',
-                                createEmbedDescription = createEmEmbedDescription em',
-                                createEmbedColor = Just DiscordColorLuminousVividPink
-                              }
-                      let emText = T.pack $ printf "%s egg moves in %s: %s" fullName (show game) (T.intercalate ", " (map emwpName ems'))
-                      let embeds = map makeEmEmbedWithParents ems'
-                      let postSubsequentEms remainingEmbeds =
-                            case splitAt 5 remainingEmbeds of
-                              ([], []) -> pure ()
-                              (xs, ys) -> do
-                                restCall_ $
-                                  DR.CreateMessageDetailed
-                                    (messageChannelId m)
-                                    ( def
-                                        { DR.messageDetailedReference = Nothing,
-                                          DR.messageDetailedContent = "",
-                                          DR.messageDetailedAllowedMentions = Nothing,
-                                          DR.messageDetailedEmbeds = Just xs
-                                        }
-                                    )
-                                postSubsequentEms ys
-                      case splitAt 5 embeds of
-                        (xs, ys) -> do
-                          restCall_ $
-                            DR.CreateMessageDetailed
-                              (messageChannelId m)
-                              ( def
-                                  { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
-                                    DR.messageDetailedContent = emText,
-                                    DR.messageDetailedAllowedMentions = Nothing,
-                                    DR.messageDetailedEmbeds = Just xs
-                                  }
-                              )
-                          postSubsequentEms ys
+                  let makeEmEmbedWithParents :: EggMoveWithParents -> CreateEmbed
+                      makeEmEmbedWithParents em' =
+                        def
+                          { createEmbedTitle = emwpName em',
+                            createEmbedDescription = createEmEmbedDescription em',
+                            createEmbedColor = Just DiscordColorLuminousVividPink
+                          }
+                  let emText = T.pack $ printf "%s egg moves in %s: %s" fullName (show game) (T.intercalate ", " (map emwpName ems'))
+                  let embeds = map makeEmEmbedWithParents ems'
+                  let postSubsequentEms remainingEmbeds =
+                        case splitAt 5 remainingEmbeds of
+                          ([], []) -> pure ()
+                          (xs, ys) -> do
+                            restCall_ $
+                              DR.CreateMessageDetailed
+                                (messageChannelId m)
+                                ( def
+                                    { DR.messageDetailedReference = Nothing,
+                                      DR.messageDetailedContent = "",
+                                      DR.messageDetailedAllowedMentions = Nothing,
+                                      DR.messageDetailedEmbeds = Just xs
+                                    }
+                                )
+                            postSubsequentEms ys
+                  case splitAt 5 embeds of
+                    (xs, ys) -> do
                       restCall_ $
-                        DR.CreateMessage
+                        DR.CreateMessageDetailed
                           (messageChannelId m)
-                          "(Note from Penny: Apribot's EM functionality recently underwent a major overhaul. The egg moves themselves should all be correct, but I'm not 100% sure about the parents. If you find any mistakes, please let me know. Thank you!)"
-
+                          ( def
+                              { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
+                                DR.messageDetailedContent = emText,
+                                DR.messageDetailedAllowedMentions = Nothing,
+                                DR.messageDetailedEmbeds = Just xs
+                              }
+                          )
+                      postSubsequentEms ys
+                  restCall_ $
+                    DR.CreateMessage
+                      (messageChannelId m)
+                      "(Note from Penny: Apribot's EM functionality recently underwent a major overhaul. The egg moves themselves should all be correct, but I'm not 100% sure about the parents. If you find any mistakes, please let me know. Thank you!)"
             else do
               -- Not in DMs
               ems <- getEmsNoParents game id'
@@ -361,13 +369,17 @@ respondHA m = do
               }
           )
     -- One species that has a HA
-    [(name, Just (ha', desc'))] ->
+    [(name, Just (ha', desc'))] -> do
+      let piplupDisclaimer =
+            if name `elem` ["Piplup", "Prinplup", "Empoleon"]
+              then "\n(Note that prior to SV, the Piplup family had Defiant as their HA.)"
+              else ""
       restCall_ $
         DR.CreateMessageDetailed
           (messageChannelId m)
           ( def
               { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
-                DR.messageDetailedContent = name <> "'s hidden ability is: " <> ha',
+                DR.messageDetailedContent = name <> "'s hidden ability is: " <> ha' <> piplupDisclaimer,
                 DR.messageDetailedAllowedMentions = Nothing,
                 DR.messageDetailedEmbeds = (: []) <$> makeEmbed (ha', desc')
               }
@@ -418,7 +430,9 @@ respondPotluckVotes m = do
         emoji <- canonicaliseEmoji . messageReactionEmoji $ r
         pure (emoji, messageReactionCount r)
   case eitherMsgs of
-    Left _ -> replyTo m Nothing "Could not fetch messages from #potluck-vote"
+    Left e -> do
+      tellError e "respondPotluckVotes"
+      replyTo m Nothing "Could not fetch messages from #potluck-vote"
     Right msgs -> do
       let nonBotMsgs = filter (not . userIsBot . messageAuthor) msgs
           emojiOrder = ["Bea", "Dre", "Fas", "Fri", "Hea", "Lev", "Lov", "Lur", "Moo", "Saf", "Spo"]
@@ -476,8 +490,12 @@ respondPotluckSignup m = do
             users <- lift $ restCall $ DR.GetReactions (plSignupChannelId, messageId latestMsg) emoji (100, DR.LatestReaction)
             case users of
               Right users' -> pure $ Just (simpleName, users')
-              Left _ -> pure Nothing
-          Nothing -> pure Nothing
+              Left _ -> do
+                tellError e "respondPotluckSignup:1"
+                pure Nothing
+          Nothing -> do
+            tellError e "respondPotluckSignup:2"
+            pure Nothing
       -- Construct ASCII table
       let reactions = M.fromList . catMaybes $ maybeReactions
           allUsers = nub . concat . M.elems $ reactions
@@ -497,87 +515,6 @@ respondPotluckSignup m = do
         table
     _ -> replyTo m Nothing "Could not get latest message from #potluck-signup"
 
--- | Temporary function for algorithm testing
---
--- NOT CURRENTLY USED
-_respondPotluckSignup2 :: Message -> App DiscordHandler ()
-_respondPotluckSignup2 m = do
-  let canonicaliseEmoji e = case emojiName e of
-        "\128175" -> Just ("100" :: Text)
-        "beastball" -> Just "Bea"
-        "dreamball" -> Just "Dre"
-        "fastball" -> Just "Fas"
-        "friendball" -> Just "Fri"
-        "heavyball" -> Just "Hea"
-        "levelball" -> Just "Lev"
-        "loveball" -> Just "Lov"
-        "lureball" -> Just "Lur"
-        "moonball" -> Just "Moo"
-        "safariball" -> Just "Saf"
-        "sportball" -> Just "Spo"
-        _ -> Nothing
-  -- Fetch latest message from the #potluck-signup channel
-  plChannelId <- asks cfgPotluckSignupChannelId
-  guildId <- asks cfgAprimarketGuildId
-  eitherMsg <- lift $ restCall $ DR.GetChannelMessages plChannelId (1, DR.LatestMessages)
-  case eitherMsg of
-    Right [latestMsg] -> do
-      -- Grab reactions
-      let emojis = map messageReactionEmoji (messageReactions latestMsg)
-      maybeReactions <- forM emojis $ \e -> do
-        case canonicaliseEmoji e of
-          Just simpleName -> do
-            let emoji = case emojiId e of
-                  Nothing -> emojiName e -- Builtin emoji
-                  Just eid -> emojiName e <> ":" <> T.pack (show eid) -- Custom emoji
-            users <- lift $ restCall $ DR.GetReactions (plChannelId, messageId latestMsg) emoji (100, DR.LatestReaction)
-            case users of
-              Right users' -> pure $ Just (simpleName, users')
-              Left _ -> pure Nothing
-          Nothing -> pure Nothing
-      -- Construct ASCII table but IGNORING 100s for now
-      let reactions = M.filterWithKey (\k _ -> k /= "100") $ M.fromList . catMaybes $ maybeReactions
-          allUsers = nub . concat . M.elems $ reactions
-      -- Construct row vector of total reacts
-      let nReactions = T.intercalate "," . map (T.pack . show . length) $ M.elems reactions
-      -- Construct matrix of reacts
-      let userRow user = T.intercalate "," $ map (\k -> if user `elem` (reactions M.! k) then "1" else "0") (M.keys reactions)
-          userRows = map userRow allUsers
-          table = T.unlines userRows
-      -- Print column names
-      let colNames = T.intercalate "," (M.keys reactions)
-      -- Print row names
-      userNicknames <- fmap M.fromList $ forM allUsers $ \u -> do
-        let uid = userId u
-        nick <- T.strip . T.filter (\c -> wcwidth c == 1) <$> getUserNick u (Just guildId)
-        let quotedNick = if T.any (== ',') nick then "\"" <> nick <> "\"" else nick
-        pure (uid, quotedNick)
-      let rowNames = T.intercalate "," $ map (\user -> userNicknames M.! userId user) allUsers
-
-      replyTo m Nothing $
-        T.unlines
-          [ "Total reactions to latest message in #potluck-signup",
-            "```",
-            nReactions,
-            "```",
-            "",
-            "Reaction matrix",
-            "```",
-            table,
-            "```",
-            "",
-            "Column names",
-            "```",
-            colNames,
-            "```",
-            "",
-            "Row names",
-            "```",
-            rowNames,
-            "```"
-          ]
-    _ -> replyTo m Nothing "Could not get latest message from #potluck-signup"
-
 makeThread :: Message -> App DiscordHandler ()
 makeThread m = do
   cfg <- ask
@@ -588,8 +525,8 @@ makeThread m = do
         (Just rcid, Just rmid) -> do
           eitherRepliedMsg <- lift $ restCall $ DR.GetChannelMessage (rcid, rmid)
           case eitherRepliedMsg of
-            Left err -> do
-              atomically $ print err
+            Left err1 -> do
+              tellError err1 "makeThread:1"
               replyTo m Nothing "Could not get info about the message you replied to."
             Right repliedMsg -> do
               let authorId1 = userId (messageAuthor m)
@@ -598,8 +535,8 @@ makeThread m = do
               author2 <- getUserNickFromMessage repliedMsg (messageGuildId m)
               eitherFirstMsg <- lift $ restCall $ DR.GetChannelMessages rcid (1, DR.AfterMessage 0)
               case eitherFirstMsg of
-                Left errr' -> do
-                  atomically $ print errr'
+                Left err2 -> do
+                  tellError err2 "makeThread:2"
                   replyTo m Nothing "Could not get info about the first message in the channel."
                 Right [firstMsg] -> do
                   atomically $ print (messageAuthor firstMsg)
@@ -608,8 +545,8 @@ makeThread m = do
                     when (authorId1 /= authorId2) $ do
                       eitherChannel <- lift $ restCall $ DR.GetChannel rcid
                       case eitherChannel of
-                        Left errr -> do
-                          atomically $ print errr
+                        Left err3 -> do
+                          tellError err3 "makeThread:3"
                           replyTo m Nothing "Could not get info about the channel you replied to."
                         Right chn@(ChannelPublicThread {}) -> do
                           case channelThreadName chn of
@@ -633,8 +570,8 @@ makeThread m = do
                                           DR.startThreadNoMessageInvitable = Nothing
                                         }
                               case eitherNewThread of
-                                Left err' -> do
-                                  atomically $ print err'
+                                Left err4 -> do
+                                  tellError err4 "makeThread:4"
                                   replyTo m Nothing "Could not create thread."
                                 Right newThread -> do
                                   replyTo m (Just [authorId1, authorId2]) $ "Created thread for <@" <> tshow authorId1 <> "> and <@" <> tshow authorId2 <> "> at: " <> getChannelUrl newThread
@@ -642,7 +579,7 @@ makeThread m = do
                                     DR.CreateMessageDetailed (channelId newThread) $
                                       def
                                         { DR.messageDetailedContent = "Original post by <@" <> tshow authorId1 <> ">: https://discord.com/channels/" <> tshow (channelGuild chn) <> "/" <> tshow rcid <> "/" <> tshow (messageId firstMsg),
-                                          DR.messageDetailedAllowedMentions = Just $ mentionOnly []
+                                          DR.messageDetailedAllowedMentions = Just $ mentionOnly [authorId1]
                                         }
                                   restCall_ $
                                     DR.CreateMessageDetailed (channelId newThread) $
@@ -654,7 +591,7 @@ makeThread m = do
                                     DR.CreateMessageDetailed (channelId newThread) $
                                       def
                                         { DR.messageDetailedContent = "Reply by <@" <> tshow authorId2 <> ">: https://discord.com/channels/" <> tshow (channelGuild chn) <> "/" <> tshow rcid <> "/" <> tshow rmid,
-                                          DR.messageDetailedAllowedMentions = Just $ mentionOnly []
+                                          DR.messageDetailedAllowedMentions = Just $ mentionOnly [authorId2]
                                         }
                                   restCall_ $
                                     DR.CreateMessageDetailed (channelId newThread) $
@@ -673,7 +610,7 @@ closeThread m = do
   eitherChannel <- lift $ restCall $ DR.GetChannel channelId
   case eitherChannel of
     Left err -> do
-      atomically $ print err
+      tellError err "closeThread"
       replyTo m Nothing "Could not get info about the channel you replied in."
     Right chn@(ChannelPublicThread {}) -> do
       atomically $ print chn
@@ -765,7 +702,8 @@ restCall_ :: (Request (r a), FromJSON a) => r a -> App (ReaderT DiscordHandle IO
 restCall_ req = do
   resp <- lift $ restCall req
   case resp of
-    Left e -> atomically $ print e
+    Left e -> do
+      tellError e "restCall_"
     Right _ -> pure ()
 
 cleanRedditMarkdown :: Text -> Text
@@ -928,3 +866,10 @@ replyWithFile m msgContents fname fcontents = do
             DR.messageDetailedFile = Just (fname, TE.encodeUtf8 fcontents)
           }
       )
+
+tellError :: (Show e) => e -> Text -> App DiscordHandler ()
+tellError e src = do
+  restCall_ $
+    DR.CreateMessage
+      1132000877415247903
+      ("Error in " <> src <> ": " <> T.pack (show e))

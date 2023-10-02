@@ -89,6 +89,7 @@ ha name = do
 
 data Parent
   = LevelUpParent {lupPkmnName :: Text, lupLevel :: Int}
+  | EvolutionParent {epPkmnName :: Text}
   | BreedParent {bpPkmnName :: Text}
   deriving (Eq, Ord, Show, Generic)
 
@@ -158,7 +159,11 @@ getParentsGen78 :: (MonadIO m) => [Text] -> Maybe Int -> Text -> Game -> App m [
 getParentsGen78 eggGroups evoFamilyId moveName game = do
   learnParents :: [Parent] <-
     withAppPsqlConn $ \conn ->
-      map (\(n, f, l) -> LevelUpParent (makeName n f) (fromMaybe 0 l))
+      map
+        ( \(n, f, maybel) -> case maybel of
+            Just l -> LevelUpParent (makeName n f) l
+            Nothing -> EvolutionParent (makeName n f)
+        )
         <$> query
           conn
           [sql|SELECT p.name, p.form, l.level FROM learnsets as l
@@ -216,7 +221,11 @@ getParentsGen9 :: (MonadIO m) => Text -> Game -> App m [Parent]
 getParentsGen9 moveName game = do
   learnParents :: [Parent] <-
     withAppPsqlConn $ \conn ->
-      map (\(n, f, l) -> LevelUpParent (makeName n f) (fromMaybe 0 l))
+      map
+        ( \(n, f, maybel) -> case maybel of
+            Just l -> LevelUpParent (makeName n f) l
+            Nothing -> EvolutionParent (makeName n f)
+        )
         <$> query
           conn
           [sql|SELECT p.name, p.form, l.level FROM learnsets as l

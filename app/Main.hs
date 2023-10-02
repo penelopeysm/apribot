@@ -10,7 +10,10 @@ import Trans
 import Web (web)
 
 -- | Command-line options
-data Options = Options {optPerformRoleCheckOnly :: Bool}
+data Options = Options
+  { optPerformRoleCheckOnly :: Bool,
+    optRunBackendOnly :: Bool
+  }
 
 parseOptions :: Parser Options
 parseOptions =
@@ -18,7 +21,12 @@ parseOptions =
     <$> switch
       ( long "role-check"
           <> short 'r'
-          <> help "Perform role check only"
+          <> help "Perform role check and immediately exit"
+      )
+    <*> switch
+      ( long "backend-only"
+          <> short 'b'
+          <> help "Only run web backend and not Reddit/Discord bots"
       )
 
 optionsInfo :: ParserInfo Options
@@ -34,9 +42,11 @@ optionsInfo =
 main :: IO ()
 main = do
   options <- execParser optionsInfo
-  if optPerformRoleCheckOnly options
-    then runApp roleCheck
-    else runApp $ App $ do
+  case (optPerformRoleCheckOnly options, optRunBackendOnly options) of
+    (True, True) -> error "cannot specify -r and -b simultaneously"
+    (True, False) -> runApp roleCheck
+    (False, True) -> runApp web
+    (False, False) -> runApp $ App $ do
       cfg <- ask
       if cfgOnFly cfg
         then liftIO $ putStrLn "Running on Fly.io"

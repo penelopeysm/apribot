@@ -4,7 +4,6 @@ WORKDIR /
 # Directories
 COPY ./app ./app
 COPY ./python ./python
-COPY ./static ./static
 # Files
 COPY ./apribot.cabal .
 COPY ./cabal.project .

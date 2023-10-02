@@ -82,12 +82,14 @@ executable apribot
 
     -- Other library packages from which modules are imported.
     build-depends:    base,
+                      aeson,
                       async,
                       bytestring,
                       cmark-gfm,
                       containers,
                       cookie,
                       discord-haskell >= 1.15.5,
+                      http-types,
                       lucid,
                       mtl,
                       optparse-applicative,

@@ -1,28 +1,30 @@
+{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DeriveGeneric #-}
+
 module Web (web) where
 
 import CMarkGFM
-import Control.Applicative (liftA2)
 import Control.Exception (SomeException, try)
+import Data.Aeson
 import Data.List (intersperse)
 import Data.Maybe (fromMaybe)
-import Data.Password.Bcrypt
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
-import Data.Text.Lazy (fromStrict)
 import qualified Data.Text.Lazy as TL
-import Data.Time.Clock (getCurrentTime, secondsToDiffTime, UTCTime (..))
+import Data.Time.Clock (UTCTime (..), getCurrentTime)
 import Database
 import DiscordBot (notifyDiscord)
+import GHC.Generics
 import Lucid
+import Network.HTTP.Types.Status
 import Reddit
 import Reddit.Auth (Token (..), refresh)
 import Text.HTML.SanitizeXSS (sanitizeBalance)
 import Text.Printf (printf)
 import Trans
 import Utils
-import qualified Web.Cookie as C
 import qualified Web.Scotty.Cookie as SC
 import qualified Web.Scotty.Trans as ST
 
@@ -62,48 +64,9 @@ retrieveRedditEnv = do
             else -- If it's still valid, create a new redditEnv from this token
               Just <$> liftIO (mkEnvFromToken t userAgent)
 
--- | Make a new RedditEnv by requesting a token. This is to be used on the
--- redirect URI and assumes that the user has been redirected to here after
--- granting access on Reddit (i.e. the URI query params contains an
--- authorisation code which can be used to request an access token). If the
--- params are not present then this redirects the user back to "/".
-makeNewRedditEnv :: ST.ActionT TL.Text (App IO) ()
-makeNewRedditEnv = do
-  cfg <- ask
-  -- Retrieve stored state from the cookie
-  hashedState <- fmap PasswordHash <$> SC.getCookie hashedStateCookieName
-  -- Get the authentication code and state from the URI query parameters, and
-  -- check that they're correct
-  authCodeMaybe <- (Just <$> ST.param "code") `ST.rescue` const (pure Nothing)
-  returnedState <- (Just <$> ST.param "state") `ST.rescue` const (pure Nothing)
-  case (authCodeMaybe, liftA2 checkPassword (mkPassword <$> returnedState) hashedState) of
-    (Just authCode, Just PasswordCheckSuccess) -> do
-      -- Get rid of the state
-      SC.deleteCookie hashedStateCookieName
-      -- Authenticate using the code that we just got
-      let creds =
-            CodeGrantCredentials
-              { codeGrantClientId = cfgRedditFrontendId cfg,
-                codeGrantClientSecret = cfgRedditFrontendSecret cfg,
-                codeGrantRedirectUri = cfgRedirectUri cfg,
-                codeGrantCode = authCode
-              }
-      env <- liftIO $ authenticate creds (cfgUserAgent cfg)
-      t <- liftIO $ getTokenFromEnv env
-      -- Generate a random session ID for the user and store it in a cookie
-      sessionId <- liftIO $ randomText 60
-      let sessionCookie = SC.makeSimpleCookie tokenCookieName sessionId
-      SC.setCookie $
-        sessionCookie
-          { C.setCookieMaxAge = Just $ secondsToDiffTime $ 2 * 60 * 60 * 24 * 365, -- 2 years
-            C.setCookieHttpOnly = True,
-            C.setCookieSameSite = Just C.sameSiteLax,
-            C.setCookieSecure = True
-          }
-      -- Store the token in the database using this session ID
-      lift $ addToken sessionId t
-    _ -> do
-      ST.redirect "auth_error"
+newtype RedditLoggedInResponse = RedditLoggedInResponse
+  {sessionId :: Text}
+  deriving (Show, Generic, ToJSON, FromJSON)
 
 -- | Deletes all cookies and the corresponding token from the database (if it
 -- exists)
@@ -140,7 +103,7 @@ navigation links = do
     sequence_ . intersperse " — " $ map mkLinkHtml links
     ")"
 
--- * HTML that is served
+-- * HTML that is served (TODO: PHASE OUT)
 
 data WithJS = NoJS | WithJS2Sec | WithJS0p5Sec
 
@@ -161,110 +124,6 @@ headHtml titleExtra withJS = do
       NoJS -> mempty
       WithJS2Sec -> script_ [src_ "static/enableButton2.js", type_ "module"] ("" :: Text)
       WithJS0p5Sec -> script_ [src_ "static/enableButton0p5.js", type_ "module"] ("" :: Text)
-
--- | Error HTML
-errorHtml :: Html ()
-errorHtml = doctypehtml_ $ do
-  headHtml (Just "Error") NoJS
-  body_ $ do
-    h1_ "An error occurred :("
-    p_ $ do
-      "Sorry about that. You can go back to the "
-      a_ [href_ "/"] "home page"
-      "."
-
--- | HTML for the main page
-mainHtml :: App IO (Html ())
-mainHtml = do
-  hits <- getLatestHits 50
-  nonhits <- getLatestNonHits 50
-  n <- getTotalMLAssignedRows
-  m <- getTotalMLAssignedHits
-  let tblHeader :: Html ()
-      tblHeader =
-        tr_ $ mapM_ (th_ . toHtml) ["Post ID" :: Text, "Time (UTC)", "Submitter", "Flair", "Title"]
-  let tblRow :: (Text, Text, Text, Text, UTCTime, Maybe Text) -> Html ()
-      tblRow (pid, purl, ptitle, psubmitter, ptime, pflair) =
-        tr_ $ do
-          mapM_
-            td_
-            [ code_ (toHtml pid),
-              toHtml (show ptime),
-              toHtml ("/u/" <> psubmitter),
-              toHtml (fromMaybe "" pflair)
-            ]
-          td_ [class_ "post-title"] $ a_ [href_ purl] $ toHtmlRaw $ sanitizeBalance ptitle
-
-  pure $ doctypehtml_ $ do
-    headHtml Nothing NoJS
-    body_ $ main_ $ do
-      h1_ "ApriBot"
-      div_ [class_ "prose"] $ do
-        p_ $ do
-          "ApriBot monitors new posts on the "
-          a_ [href_ "https://reddit.com/r/pokemontrades"] "/r/pokemontrades"
-          " subreddit and identifies potential Aprimon-related threads, using a machine learning algorithm trained on manually labelled /r/pokemontrades posts."
-        p_ $ do
-          toHtml (printf "So far, ApriBot's new algorithm has processed a total of %d posts," n :: String)
-          toHtml (printf " of which %d were hits (%.2f%%)." m (100 * fromIntegral m / fromIntegral n :: Double) :: String)
-          " This page shows you the most recent 50 hits and non-hits, ordered by most recent first."
-        p_ $ do
-          "ApriBot is implemented with Haskell and SQLite; the ML bits are written in Python."
-          " If you have any questions about ApriBot, feel free to get in touch with me, either via "
-          a_ [href_ "https://github.com/penelopeysm/apribot"] "GitHub"
-          " or "
-          a_ [href_ "https://reddit.com/u/is_a_togekiss"] "Reddit"
-          "."
-        p_ $ do
-          b_ "While the current algorithm has pretty decent performance, I might be able to make it even better in the future with more data."
-          " If you are interested and have a few minutes to spare, do head over to the "
-          a_ [href_ "/contribute"] "contribute page"
-          "—I will be very grateful!"
-      h2_ "Hits"
-      if null hits
-        then p_ "None so far!"
-        else table_ $ do
-          thead_ tblHeader
-          tbody_ $ mapM_ tblRow (take 50 hits)
-      h2_ "Non-hits"
-      if null nonhits
-        then p_ "None so far!"
-        else table_ $ do
-          thead_ tblHeader
-          tbody_ $ mapM_ tblRow (take 50 nonhits)
-
-logoutHtml :: Html ()
-logoutHtml = doctypehtml_ $ do
-  headHtml (Just "Logged out") NoJS
-  body_ $ main_ $ do
-    h1_ "Logged out"
-    navigation [Home, Contribute, Privacy]
-    p_ "You have been logged out. Thank you so much for your time!"
-
-privacyHtml :: Html ()
-privacyHtml = doctypehtml_ $ do
-  headHtml (Just "Privacy") NoJS
-  body_ $ main_ $ do
-    h1_ "Privacy"
-    navigation [Home, Contribute]
-    h2_ "Personal information"
-    p_ $ do
-      "The only personal information ApriBot stores about you is your Reddit username (on posts which you have labelled). "
-      "This information is required to make sure that you are not asked to label the same post twice. "
-      "It is not shared with anybody else, and your votes can only be viewed by you. "
-    h2_ "Cookies"
-    p_ $ do
-      "ApriBot uses one cookie to log you into Reddit securely (using OAuth), and another to store your login status so that you don't have to keep logging in, but otherwise does not perform any other tracking. "
-      "If you want to verify this, the source code of ApriBot can be viewed on "
-      a_ [href_ "https://github.com/penelopeysm/apribot"] "GitHub"
-      "."
-    h2_ "Contact me..."
-    p_ $ do
-      "...via "
-      a_ [href_ "https://github.com/penelopeysm/apribot"] "GitHub"
-      " or "
-      a_ [href_ "https://reddit.com/u/is_a_togekiss"] "Reddit"
-      "."
 
 authErrorHtml :: Html ()
 authErrorHtml = doctypehtml_ $ do
@@ -412,147 +271,191 @@ yourVotesHtml' username = do
             tbody_ $ do
               mapM_ makeTableRow votes
 
--- | Serve static file
-static :: FilePath -> TL.Text -> ST.ActionT TL.Text (App IO) ()
-static path mimeType = do
-  staticDir <- asks cfgStaticDir
-  ST.setHeader "Content-Type" mimeType
-  ST.file (staticDir <> "/" <> path)
-
 -- * The web app
+
+-- | /api/total_assigned
+data TotalAssignedResponse = TotalAssignedResponse
+  {rows :: Int, hits :: Int}
+  deriving (Generic, Show, ToJSON)
+
+data MainPagePostDetails = MainPagePostDetails
+  { post_id :: Text,
+    post_url :: Text,
+    post_title :: Text,
+    post_submitter :: Text,
+    post_time :: UTCTime,
+    post_flair :: Maybe Text
+  }
+  deriving (Generic, Show)
+
+instance ToJSON MainPagePostDetails where
+  toJSON = genericToJSON $ defaultOptions {fieldLabelModifier = drop 5}
+
+-- | /api/ml_stats
+data MLStatsResponse = MLStatsResponse
+  {seen :: Int, labelled :: Int}
+  deriving (Generic, Show, ToJSON)
+
+newtype BackendError = BackendError
+  { error :: Text
+  }
+  deriving (Generic, Show, ToJSON)
+
+newtype CodeParam = CodeParam
+  { code :: Text
+  }
+  deriving (Generic, Show, ToJSON, FromJSON)
+
+newtype StateParam = StateParam
+  { state :: Text
+  }
+  deriving (Generic, Show, ToJSON, FromJSON)
 
 web :: App IO ()
 web = do
   cfg <- ask
   atomically $ printf "Launching web server on port %d...\n" (cfgPort cfg)
 
-  ST.scottyT (cfgPort cfg) (runAppWith cfg) $ do
-    -- everything inside here is ~ ScottyT TL.Text (App IO) ()
-    let serve = ST.html . renderText
-    let serve' html' = do
-          html <- liftIO $ runAppWith cfg html'
-          serve html
+  let x :: ST.ScottyT TL.Text (App IO) ()
+      x = do
+        -- everything inside here is ~ ScottyT TL.Text (App IO) ()
+        ST.get (ST.regex "^.*$") $ do
+          ST.html $ renderText $ p_ "ApriBot's web frontend is currently being redeveloped; please check back in a day or so."
 
-    ST.defaultHandler $ \e -> do
-      lift $ atomically $ printf "Scotty caught exception: <%s>\n" (show e)
-      serve errorHtml
+        -- -- Backend API
+        -- ST.get "/api/total_assigned" $ do
+        --   totalRows <- lift getTotalMLAssignedRows
+        --   totalHits <- lift getTotalMLAssignedHits
+        --   ST.json $ TotalAssignedResponse totalRows totalHits
 
-    ST.get "/static/styles.css" $ do
-      static "styles.css" "text/css"
-    ST.get "/static/site.webmanifest" $ do
-      static "site.webmanifest" "application/manifest+json"
-    ST.get "/static/favicon.ico" $ do
-      static "favicon.ico" "image/x-icon"
-    ST.get "/static/favicon-16x16.png" $ do
-      static "favicon-16x16.png" "image/x-png"
-    ST.get "/static/favicon-32x32.png" $ do
-      static "favicon-32x32.png" "image/x-png"
-    ST.get "/static/apple-touch-icon.png" $ do
-      static "apple-touch-icon.png" "image/x-png"
-    ST.get "/static/android-chrome-192x192.png" $ do
-      static "android-chrome-192x192.png" "image/x-png"
-    ST.get "/static/android-chrome-512x512.png" $ do
-      static "android-chrome-512x512.png" "image/x-png"
-    ST.get "/static/enableButton2.js" $ do
-      static "enableButton2.js" "text/javascript"
-    ST.get "/static/enableButton0p5.js" $ do
-      static "enableButton0p5.js" "text/javascript"
+        -- ST.get "/api/hits" $ do
+        --   nPosts :: Int <- ST.param "limit" `ST.rescue` const (pure 50)
+        --   posts <- lift $ getLatestHits nPosts
+        --   -- TODO: Ugly. The conversion should be done in getLatestHits
+        --   ST.json $ map (\(a, b, c, d, e, f) -> MainPagePostDetails a b c d e f) posts
 
-    ST.get "/" $ do
-      lift mainHtml >>= serve
+        -- ST.get "/api/nonhits" $ do
+        --   nPosts :: Int <- ST.param "limit" `ST.rescue` const (pure 50)
+        --   posts <- lift $ getLatestNonHits nPosts
+        --   -- TODO: Ugly. The conversion should be done in getLatestHits
+        --   ST.json $ map (\(a, b, c, d, e, f) -> MainPagePostDetails a b c d e f) posts
 
-    ST.get "/authorised" $ do
-      makeNewRedditEnv
-      ST.redirect "/contribute"
+        -- ST.get "/api/ml_stats" $ do
+        --   totalPosts <- lift getTotalRows
+        --   labelledPosts <- lift getTotalNumberLabelled
+        --   ST.json $ MLStatsResponse totalPosts labelledPosts
 
-    ST.get "/auth_error" $ do
-      serve authErrorHtml
+        -- ST.post "/api/login_username" $ do
+        --   let clientId = cfgRedditFrontendId cfg
+        --       clientSecret = cfgRedditFrontendSecret cfg
+        --       userAgent = cfgUserAgent cfg
+        --   maybeSessionId :: Maybe RedditLoggedInResponse <- decode <$> ST.body
+        --   case maybeSessionId of
+        --     Nothing -> do
+        --       ST.status status400
+        --       ST.json $ BackendError "No session ID provided"
+        --     Just (RedditLoggedInResponse sessionId) -> do
+        --       maybeToken <- lift $ getToken sessionId
+        --       case maybeToken of
+        --         Nothing -> do
+        --           ST.status status401
+        --           ST.json $ BackendError "No token found for this session ID"
+        --         Just t -> do
+        --           -- Check if the token is expired. If so, refresh the token and update
+        --           -- the database.
+        --           activeToken <- do
+        --             now <- liftIO getCurrentTime
+        --             if now > tokenExpiresAt t
+        --               then do
+        --                 rt <- liftIO $ refresh clientId clientSecret userAgent t
+        --                 lift $ atomically $ T.putStrLn "refreshing token"
+        --                 lift $ updateToken sessionId rt
+        --                 pure rt
+        --               else pure t
+        --           -- Get the logged in user's name using the token
+        --           env <- liftIO (mkEnvFromToken activeToken userAgent)
+        --           usernameEither <- liftIO $ try $ runRedditT env (accountUsername <$> myAccount)
+        --           case usernameEither of
+        --             Left (e :: SomeException) -> do
+        --               lift $ atomically $ print e
+        --               ST.status status401
+        --               ST.json $ BackendError "Could not retrieve Reddit username from token"
+        --             Right username -> do
+        --               ST.json $ object ["username" .= username]
 
-    ST.get "/contrib_error" $ do
-      serve contribErrorHtml
+        -- ST.post "/api/make_reddit_token" $ do
+        --   maybeAuthCode :: Maybe CodeParam <- decode <$> ST.body
+        --   case maybeAuthCode of
+        --     Nothing -> do
+        --       ST.status status400
+        --       ST.json $ BackendError "No code provided"
+        --     Just (CodeParam authCode) -> do
+        --       -- Authenticate using the code that we just got
+        --       let creds =
+        --             CodeGrantCredentials
+        --               { codeGrantClientId = cfgRedditFrontendId cfg,
+        --                 codeGrantClientSecret = cfgRedditFrontendSecret cfg,
+        --                 codeGrantRedirectUri = cfgRedirectUri cfg,
+        --                 codeGrantCode = authCode
+        --               }
+        --       env <- liftIO $ authenticate creds (cfgUserAgent cfg)
+        --       t <- liftIO $ getTokenFromEnv env
+        --       -- Generate a random session ID for the user and store the token in the
+        --       -- database using this
+        --       sessionId <- liftIO $ randomText 60
+        --       lift $ addToken sessionId t
+        --       -- Return the session ID
+        --       ST.json $ RedditLoggedInResponse sessionId
 
-    ST.get "/login" $ do
-      maybeEnv <- retrieveRedditEnv
-      case maybeEnv of
-        Just _ -> ST.redirect "/contribute"
-        Nothing -> do
-          -- Generate a random state for the user, and store it as a cookie
-          state <- liftIO $ randomText 40
-          hash <- liftIO $ unPasswordHash <$> hashPassword (mkPassword state)
-          let stateCookie = SC.makeSimpleCookie hashedStateCookieName hash
-          SC.setCookie $
-            stateCookie
-              { C.setCookieHttpOnly = True,
-                C.setCookieSecure = True,
-                C.setCookieSameSite = Just C.sameSiteLax,
-                C.setCookieMaxAge = Just (secondsToDiffTime 600)
-              }
-          -- Redirect to Reddit's auth page
-          clientId <- asks cfgRedditFrontendId
-          redirectUri <- asks cfgRedirectUri
-          ST.redirect $
-            fromStrict $
-              mkRedditAuthURL
-                False
-                AuthUrlParams
-                  { authUrlClientID = clientId,
-                    authUrlState = state,
-                    authUrlRedirectUri = redirectUri,
-                    authUrlDuration = Permanent,
-                    authUrlScopes = Set.singleton ScopeIdentity
-                  }
+        -- ST.post "/api/get_login_url" $ do
+        --   maybeState :: Maybe StateParam <- decode <$> ST.body
+        --   case maybeState of
+        --     Nothing -> do
+        --       ST.status status400
+        --       ST.json $ BackendError "No state parameter provided"
+        --     Just (StateParam state) -> do
+        --       let clientId = cfgRedditFrontendId cfg
+        --           redirectUri = cfgRedirectUri cfg
+        --           url =
+        --             mkRedditAuthURL
+        --               False
+        --               AuthUrlParams
+        --                 { authUrlClientID = clientId,
+        --                   authUrlState = state,
+        --                   authUrlRedirectUri = redirectUri,
+        --                   authUrlDuration = Permanent,
+        --                   authUrlScopes = Set.singleton ScopeIdentity
+        --                 }
+        --       ST.json $ object ["url" .= url]
 
-    ST.get "/logout" $ do
-      maybeCookie <- SC.getCookie tokenCookieName
-      case maybeCookie of
-        Nothing -> ST.redirect "/"
-        Just _ -> cleanup >> serve logoutHtml
+        -- ST.post "/api/logout" $ do
+        --   maybeSessionId :: Maybe RedditLoggedInResponse <- decode <$> ST.body
+        --   case maybeSessionId of
+        --     Nothing -> do
+        --       ST.status status400
+        --       ST.json $ BackendError "No session ID provided"
+        --     Just (RedditLoggedInResponse sessionId) -> do
+        --       lift $ removeToken sessionId
+        --       ST.json $ object ["success" .= True]
 
-    ST.post "/contribute" $ do
-      mPostId :: Maybe Text <- (Just <$> ST.param "id") `ST.rescue` const (pure Nothing)
-      mVoter :: Maybe Text <- (Just <$> ST.param "username") `ST.rescue` const (pure Nothing)
-      mVote :: Maybe Int <- (Just <$> ST.param "vote") `ST.rescue` const (pure Nothing)
-      case (mPostId, mVoter, mVote) of
-        (Just postId, Just voter, Just vote) ->
-          if vote /= 0 && vote /= 1
-            then ST.redirect "/contribute"
-            else do
-              lift $ addVote postId voter (vote == 1)
-              hit <- lift $ wasHit postId
-              when (not hit && vote == 1) $ lift $ do
-                atomically $ T.putStrLn ("Notifying about false negative " <> postId)
-                notifyDiscord (NotifyPostById (PostID postId))
-              when (hit && vote == 0) $ lift $ do
-                atomically $ T.putStrLn ("Removing false positive " <> postId)
-                notifyDiscord (UnnotifyPostById (PostID postId))
-              ST.redirect "/contribute"
-        _ -> ST.redirect "/contrib_error"
+        -- ST.post "/api/contribute" $ do
+        --   mPostId :: Maybe Text <- (Just <$> ST.param "id") `ST.rescue` const (pure Nothing)
+        --   mVoter :: Maybe Text <- (Just <$> ST.param "username") `ST.rescue` const (pure Nothing)
+        --   mVote :: Maybe Int <- (Just <$> ST.param "vote") `ST.rescue` const (pure Nothing)
+        --   case (mPostId, mVoter, mVote) of
+        --     (Just postId, Just voter, Just vote) ->
+        --       if vote /= 0 && vote /= 1
+        --         then ST.redirect "/contribute"
+        --         else do
+        --           lift $ addVote postId voter (vote == 1)
+        --           hit <- lift $ wasHit postId
+        --           when (not hit && vote == 1) $ lift $ do
+        --             atomically $ T.putStrLn ("Notifying about false negative " <> postId)
+        --             notifyDiscord (NotifyPostById (PostID postId))
+        --           when (hit && vote == 0) $ lift $ do
+        --             atomically $ T.putStrLn ("Removing false positive " <> postId)
+        --             notifyDiscord (UnnotifyPostById (PostID postId))
+        --           ST.redirect "/contribute"
+        --     _ -> ST.redirect "/contrib_error"
 
-    ST.get "/contribute" $ do
-      maybeEnv <- retrieveRedditEnv
-      case maybeEnv of
-        Nothing -> serve' contributingLoggedOutHtml'
-        Just env -> do
-          usernameEither <- liftIO $ try $ runRedditT env (accountUsername <$> myAccount)
-          case usernameEither of
-            Left e -> do
-              cleanup
-              ST.raise (TL.pack $ show (e :: SomeException))
-            Right username -> do
-              serve' (contributingLoggedInHtml' username)
-
-    ST.get "/privacy" $ do
-      serve privacyHtml
-
-    ST.get "/your_votes" $ do
-      maybeEnv <- retrieveRedditEnv
-      case maybeEnv of
-        Nothing -> ST.redirect "/contribute"
-        Just env -> do
-          usernameEither <- liftIO $ try $ runRedditT env (accountUsername <$> myAccount)
-          case usernameEither of
-            Left e -> do
-              cleanup
-              ST.raise (TL.pack $ show (e :: SomeException))
-            Right username -> do
-              serve' (yourVotesHtml' username)
+  ST.scottyT (cfgPort cfg) (runAppWith cfg) x
