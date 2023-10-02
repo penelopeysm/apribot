@@ -148,7 +148,13 @@ notifyLoop = do
             -- Add it to the notified posts in the DB
             case maybeMessage of
               Nothing -> pure ()
-              Just msg -> addNotifiedPost (postId post) (messageChannelId msg) (messageId msg)
+              Just msg -> do
+                guildId <- asks cfgAprimarketGuildId
+                restCall_ $
+                  DR.CreateMessage
+                    1132000877415247903
+                    (T.pack $ printf "Notified about post %s: https://discord.com/channels/%s/%s/%s" (unPostID $ postId post) (show guildId) (show $ messageChannelId msg) (show $ messageId msg))
+                addNotifiedPost (postId post) (messageChannelId msg) (messageId msg)
   -- Delete the post (if it's not supposed to be there)
   let unnotifyPost :: ID Post -> App DiscordHandler ()
       unnotifyPost pid = do
