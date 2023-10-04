@@ -35,13 +35,13 @@
             {#if $page.url.pathname == "/potluck"}
                 <span class="italic">potlucks</span>
             {:else}
-            <a
-                class="italic"
-                class:here={$page.url.pathname == "/potluck"}
-                href="/potluck">
+                <a
+                    class="italic"
+                    class:here={$page.url.pathname == "/potluck"}
+                    href="/potluck"
+                >
                     <div id="potluck-dropdown">potlucks</div>
-                </a
-            >
+                </a>
             {/if}
         </li>
     </ul>
@@ -56,11 +56,11 @@
                     {#if $page.url.pathname == "/your_votes"}
                         <span class="italic">your votes</span>
                     {:else}
-                    <a
-                        class="italic"
-                        class:here={$page.url.pathname == "/your_votes"}
-                        href="/your_votes">your votes</a
-                    >
+                        <a
+                            class="italic"
+                            class:here={$page.url.pathname == "/your_votes"}
+                            href="/your_votes">your votes</a
+                        >
                     {/if}
                 </li>
                 <li>
@@ -90,36 +90,52 @@
 <slot />
 
 <style>
-    nav {
-        display: flex;
-        flex-direction: row;
-        flex-wrap: wrap;
-        row-gap: 0px;
-        column-gap: 50px;
-        align-items: center;
-        width: 100%;
-        justify-content: center;
+    @media (max-width: 600px) {
+        nav {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+        ul {
+            padding: 0;
+        }
+        ul.links li {
+            list-style-type: none;
+        }
     }
 
-    ul.links {
-        display: flex;
-        flex-direction: row;
-        gap: 12px;
-        align-items: center;
-        justify-content: center;
-        margin-right: auto;
-        padding: 0;
-        margin-top: 5px;
-        margin-bottom: 5px;
-    }
+    @media (min-width: 600px) {
+        nav {
+            display: flex;
+            flex-direction: row;
+            flex-wrap: wrap;
+            row-gap: 0px;
+            column-gap: 50px;
+            align-items: center;
+            width: 100%;
+            justify-content: center;
+        }
 
-    ul.links li {
-        list-style-type: none;
-    }
+        ul.links {
+            display: flex;
+            flex-direction: row;
+            gap: 12px;
+            align-items: center;
+            justify-content: center;
+            margin-right: auto;
+            padding: 0;
+            margin-top: 5px;
+            margin-bottom: 5px;
+        }
 
-    ul.links li + li:before {
-        content: " • ";
-        padding-right: 10px;
+        ul.links li {
+            list-style-type: none;
+            display: inline-block;
+        }
+
+        ul.links li + li:before {
+            content: " • ";
+            padding-right: 10px;
+        }
     }
 
     form {
