@@ -92,7 +92,7 @@
                     }}
                     on:click={() => {
                         clickedUser = user;
-                    }}>{user}</td
+                    }}><div>{user}</div></td
                 >
             {/each}
             <th>Total sending</th>
@@ -100,8 +100,8 @@
         {#each tableData as tableRow, i}
             <tr>
                 {#if i === 0}
-                    <th rowspan={tableData.length}
-                        ><span class="rotated">Sending</span></th
+                    <th rowspan={tableData.length} class="rotated"
+                        ><div>Sending</div></th
                     >
                 {/if}
                 <td
@@ -147,13 +147,15 @@
                 {#each tableRow.giving as giving, j}
                     <td
                         on:mouseover={() => {
-                            if (giving) setHighlighted(tableRow.username, users[j]);
+                            if (giving)
+                                setHighlighted(tableRow.username, users[j]);
                         }}
                         on:mouseout={() => {
                             setHighlighted(null, null);
                         }}
                         on:focus={() => {
-                            if (giving) setHighlighted(tableRow.username, users[j]);
+                            if (giving)
+                                setHighlighted(tableRow.username, users[j]);
                         }}
                         on:blur={() => {
                             setHighlighted(null, null);
@@ -252,15 +254,20 @@
     }
 
     .rotated {
-        /* Very neat hack from https://stackoverflow.com/a/47245068 */
-        writing-mode: vertical-rl;
-        transform: rotate(180deg);
         white-space: nowrap;
         min-width: 25px;
         max-width: 25px;
-        min-height: max-content;
-        max-height: max-content;
-        vertical-align: baseline;
+        /* This value needs to account for the maximum height of the rotated inner div.
+           There's no CSS-only way to calculate this, afaik (though you can use JavaScript) */
+        min-height: 120px;
+        height: 120px;
+    }
+
+    .rotated div {
+        transform: rotate(-90deg);
+        transform-origin: center left;
+        translate: 50% 250%;
+        height: max-content;
     }
 
     .middle {
