@@ -106,6 +106,7 @@ eventHandler e = do
           when ("!em " `T.isPrefixOf` T.toLower msgText) (respondEM m)
           when ("!ha " `T.isPrefixOf` T.toLower msgText) (respondHA m)
           when ("!nature " `T.isPrefixOf` T.toLower msgText) (respondNature m)
+          when ("!legality " `T.isPrefixOf` T.toLower msgText) (respondLegality m)
           when ("!thread" `T.isPrefixOf` T.toLower msgText) (makeThread m)
           when (any (`T.isPrefixOf` T.toLower msgText) ["!close", "[close]"]) (closeThread m)
     -- Ignore other events (for now)
@@ -334,7 +335,7 @@ respondEM m = do
                             DR.messageDetailedEmbeds = Just [emEmbedShort]
                           }
                       )
-        _ -> replyTo m Nothing "found multiple matches: this should not happen, please let Penny know"
+        _ -> replyTo m Nothing "Found multiple matches: this should not happen, please let Penny know"
 
 respondHA :: Message -> App DiscordHandler ()
 respondHA m = do
@@ -406,6 +407,69 @@ respondHA m = do
                 DR.messageDetailedEmbeds = Just embeds
               }
           )
+
+respondLegality :: Message -> App DiscordHandler ()
+respondLegality m = do
+  atomically $ T.putStrLn "LEGALITY"
+  let msgText = T.strip (messageContent m)
+      pkmn = T.strip . T.drop 9 $ msgText
+  -- Try to fetch the Pokemon first.
+  pkmnDetails <- getPokemonIdsAndDetails pkmn
+  case pkmnDetails of
+    [] -> replyTo m Nothing $ "No Pokémon with name '" <> pkmn <> "' found."
+    [(pkmnId, pkmnName, pkmnForm, _)] -> do
+      apriGuildId <- asks cfgAprimarketGuildId
+      let onAprimarket :: Bool
+          onAprimarket = messageGuildId m == Just apriGuildId
+      let showLegality :: GenLegality -> Text
+          showLegality (GenLegality b d a s sp)
+            | not (b || d || a || s || sp) = "No ball combos available"
+            | otherwise =
+                if onAprimarket
+                  then
+                    T.concat
+                      [ if b then ":beastball:" else "",
+                        if d then ":dreamball:" else "",
+                        if a then ":fastball::friendball::heavyball::levelball::loveball::lureball::moonball::" else "",
+                        if s then ":safariball:" else "",
+                        if sp then ":sportball:" else ""
+                      ]
+                  else
+                    T.intercalate
+                      ", "
+                      ( catMaybes
+                          [ if b then Just "Beast" else Nothing,
+                            if d then Just "Dream" else Nothing,
+                            if a then Just "Apricorn" else Nothing,
+                            if s then Just "Safari" else Nothing,
+                            if sp then Just "Sport" else Nothing
+                          ]
+                      )
+      let fullName = pkmnName <> maybe "" (\f -> " (" <> f <> ")") pkmnForm
+      legalities <- getLegality pkmnId
+      let message :: Text
+          message =
+            "Ball legality for "
+              <> fullName
+              <> "\n"
+              <> T.intercalate
+                "\n"
+                ( map
+                    ( \(game, (gameAvailability, legality)) ->
+                        ( if gameAvailability
+                            then ":white_check_mark:"
+                            else ":x:"
+                        )
+                          <> " **"
+                          <> T.pack (show game)
+                          <> "** "
+                          <> if gameAvailability then showLegality legality else "Not available in game"
+                    )
+                    (M.assocs legalities)
+                )
+
+      replyTo m Nothing message
+    _ -> replyTo m Nothing "Found multiple matches: this should not happen, please let Penny know"
 
 respondPotluckVotes :: Message -> App DiscordHandler ()
 respondPotluckVotes m = do

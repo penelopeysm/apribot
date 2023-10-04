@@ -14,12 +14,17 @@ module Pokemon
     EggMoveWithParents (..),
     getPokemonIdsAndDetails,
     SqlException (..),
+    getLegality,
+    GenLegality (..),
   )
 where
 
 import Control.Exception (Exception (..), throwIO)
 import Control.Monad (forM)
 import Control.Monad.IO.Class (MonadIO (..))
+import Data.List (foldl')
+import Data.Map (Map)
+import qualified Data.Map as M
 import Data.Text (Text)
 import qualified Data.Text as T
 import Database.PostgreSQL.Simple
@@ -123,17 +128,13 @@ randomMoves = do
 -- TODO: We should fix the special cases in the database
 getPokemonIdsAndDetails :: (MonadIO m) => Text -> App m [(Int, Text, Maybe Text, Text)]
 getPokemonIdsAndDetails name = do
-  let fixedName = case name of
-        "morpeko" -> "morpeko-full-belly"
-        "eiscue" -> "eiscue-ice"
-        t -> t
   withAppPsqlConn $ \conn ->
     query
       conn
       [sql|SELECT id, name, form, unique_name
              FROM pokemon
              WHERE unique_name ILIKE ?;|]
-      (Only fixedName)
+      (Only name)
 
 getEmsNoParents :: (MonadIO m) => Game -> Int -> App m [EggMoveNoParents]
 getEmsNoParents game pkmnId = do
@@ -301,3 +302,110 @@ getEmsWithParents game pkmnId = do
           getParentsGen78 eggGroups familyId nm game
         else getParentsGen9 nm game
     pure $ EggMoveWithParents nm ft parents
+
+-- * Legality
+
+data GenLegality = GenLegality
+  { beast :: Bool,
+    dream :: Bool,
+    apri :: Bool,
+    safari :: Bool,
+    sport :: Bool
+  }
+  deriving (Eq, Show)
+
+data Legality = Legality
+  { bank :: GenLegality,
+    home :: GenLegality
+  }
+  deriving (Eq, Show)
+
+legalityOr :: Legality -> Legality -> Legality
+legalityOr (Legality b1 h1) (Legality b2 h2) =
+  Legality
+    (GenLegality (beast b1 || beast b2) (dream b1 || dream b2) (apri b1 || apri b2) (safari b1 || safari b2) (sport b1 || sport b2))
+    (GenLegality (beast h1 || beast h2) (dream h1 || dream h2) (apri h1 || apri h2) (safari h1 || safari h2) (sport h1 || sport h2))
+
+genLegalityAndBool :: GenLegality -> Bool -> GenLegality
+genLegalityAndBool (GenLegality b d a s sp) singleBool =
+  GenLegality (b && singleBool) (d && singleBool) (a && singleBool) (s && singleBool) (sp && singleBool)
+
+legalityAllFalse :: Legality
+legalityAllFalse = Legality (GenLegality False False False False False) (GenLegality False False False False False)
+
+-- | Parse the results of a SQL query into a 'Legality'. Make sure the columns
+-- requested are in the correct order!
+parseLegalitySql :: (Bool, Bool, Bool, Bool, Bool, Bool, Bool, Bool, Bool, Bool) -> Legality
+parseLegalitySql (b1, d1, a1, s1, sp1, b2, d2, a2, s2, sp2) =
+  Legality
+    (GenLegality b1 d1 a1 s1 sp1)
+    (GenLegality b2 d2 a2 s2 sp2)
+
+getLegality :: (MonadIO m) => Int -> App m (Map Game (Bool, GenLegality))
+getLegality pkmnId = do
+  -- Get the legality of all members in the same evolution family, and combine
+  -- them using `legalityOr`. In practice, this accomplishes two things:
+  -- 1. We can search for legality of evolutions.
+  -- 2. We can combine legality of regional variants and other forms, assuming
+  -- that they are crossbreedable. The only exceptions to this, as of SV DLC1,
+  -- are Tauros and Flabebe. This is taken care of in the database by:
+  --    - Not having the different Tauros forms belong to the same evolution
+  --      family. (Their evolution family is NULL)
+  --    - Not listing separate Flabebe forms.
+  evoFamilyId :: Maybe Int <- do
+    sqlEvoFamilyId <- withAppPsqlConn $ \conn ->
+      query
+        conn
+        [sql|SELECT evolution_family_id FROM pokemon WHERE id = ?;|]
+        (Only pkmnId)
+    case sqlEvoFamilyId of
+      [Only i] -> pure i
+      _ -> error "getLegality: expected exactly one evolution family id"
+  legalitySql :: [Legality] <- withAppPsqlConn $ \conn ->
+    map parseLegalitySql
+      <$> case evoFamilyId of
+        Just efId ->
+          query
+            conn
+            [sql|SELECT l.bank_beast, l.bank_dream, l.bank_apri, l.bank_safari, l.bank_sport,
+                            l.home_beast, l.home_dream, l.home_apri, l.home_safari, l.home_sport
+                            FROM legality as l
+                            LEFT JOIN pokemon as p ON l.pokemon_id = p.id
+                            WHERE p.evolution_family_id = ?;|]
+            (Only efId)
+        Nothing ->
+          query
+            conn
+            [sql|SELECT l.bank_beast, l.bank_dream, l.bank_apri, l.bank_safari, l.bank_sport,
+                            l.home_beast, l.home_dream, l.home_apri, l.home_safari, l.home_sport
+                            FROM legality as l
+                            LEFT JOIN pokemon as p ON l.pokemon_id = p.id
+                            WHERE p.id = ?;|]
+            (Only pkmnId)
+  let baseLegality = foldl' legalityOr legalityAllFalse legalitySql
+
+  -- `baseLegality` tells us the legality of a Pokemon in Bank and HOME.
+  -- However, it does not take care of the case where a Pokemon cannot enter a
+  -- game (due to Dexit). To figure this out, we need to determine which mons
+  -- can enter which game. This is done by querying the learnsets table: if a
+  -- mon cannot learn any move in a game, we assume this means it cannot enter
+  -- the game.
+  gamesAvailableIn <- do
+    withAppPsqlConn $ \conn -> do
+      gameIds <-
+        query
+          conn
+          [sql|SELECT g.id
+                 FROM learnsets as l
+                 INNER JOIN games as g ON l.game_id = g.id
+                 WHERE l.pokemon_id = ?
+                 GROUP BY g.id;|]
+          (Only pkmnId)
+      pure $ map (\case Only (1 :: Int) -> USUM; Only 2 -> SwSh; Only 3 -> BDSP; Only 4 -> SV; _ -> error "getLegality: unexpected game") gameIds
+  pure $
+    M.fromList
+      [ (USUM, (USUM `elem` gamesAvailableIn, bank baseLegality `genLegalityAndBool` (USUM `elem` gamesAvailableIn))),
+        (SwSh, (SwSh `elem` gamesAvailableIn, home baseLegality `genLegalityAndBool` (SwSh `elem` gamesAvailableIn))),
+        (BDSP, (BDSP `elem` gamesAvailableIn, home baseLegality `genLegalityAndBool` (BDSP `elem` gamesAvailableIn))),
+        (SV, (SV `elem` gamesAvailableIn, home baseLegality `genLegalityAndBool` (SV `elem` gamesAvailableIn)))
+      ]
