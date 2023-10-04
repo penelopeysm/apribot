@@ -256,8 +256,11 @@
         writing-mode: vertical-rl;
         transform: rotate(180deg);
         white-space: nowrap;
-        min-height: min-content;
-        vertical-align: top;
+        min-width: 25px;
+        max-width: 25px;
+        min-height: max-content;
+        max-height: max-content;
+        vertical-align: baseline;
     }
 
     .middle {
