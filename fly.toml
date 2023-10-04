@@ -7,5 +7,5 @@ app = "apribot"
 primary_region = "lhr"
 
 [http_service]
-  internal_port = 8080
+  internal_port = 80
   force_https = true

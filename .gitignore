@@ -1,5 +1,6 @@
-dist-newstyle
+hs/dist-newstyle
 *.db
 **/__pycache__
-python/venv
-cabal.project.local
+hs/python/venv
+web/node_modules
+hs/cabal.project.local

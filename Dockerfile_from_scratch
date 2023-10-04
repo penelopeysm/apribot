@@ -8,34 +8,37 @@
 # image, meaning that we don't have to re-build the dependencies every time we
 # deploy.
 
-FROM python:3.11.4-bookworm
+FROM nikolaik/python-nodejs:python3.11-nodejs20
 
 WORKDIR /
 
-# Directories
-COPY ./app ./app
-COPY ./python ./python
-COPY ./static ./static
-# Files
-COPY ./apribot.cabal .
-COPY ./cabal.project .
-COPY ./cabal.project.freeze .
+# Copy Haskell bits
+WORKDIR /hs
+COPY ./hs/app ./app
+COPY ./hs/python ./python
+COPY ./hs/apribot.cabal .
+COPY ./hs/cabal.project .
+COPY ./hs/cabal.project.freeze .
 
-# This line circumvents a spurious error with cabal.project's git submodule.
-# It should go away if I ever upload reddit-oauth2 to Hackage
-RUN git config --global --add safe.directory '*'
-
-# Install packages
-RUN python -m pip install --upgrade pip setuptools && python -m pip install -r python/requirements.txt
-
-# Set up Haskell
-# https://stackoverflow.com/a/71513191
+# Set up Haskell: see https://stackoverflow.com/a/71513191
 RUN curl https://downloads.haskell.org/~ghcup/x86_64-linux-ghcup > /usr/bin/ghcup && chmod +x /usr/bin/ghcup
 # discord-haskell doesn't work with GHC 9.6, so we stick to 9.4
 RUN ghcup -v install ghc --isolate /usr/local --force 9.4.5 && ghcup -v install cabal --isolate /usr/local/bin --force 3.6.2.0
-RUN cabal update
-RUN cabal build
+# This line circumvents a spurious error with cabal.project's git submodule.
+# It should go away if I ever upload reddit-oauth2 to Hackage
+RUN git config --global --add safe.directory '*'
+RUN cabal update && cabal build
 
+# Install Python packages and supervisor
+RUN python -m pip install --upgrade pip setuptools \
+    && python -m pip install -r python/requirements.txt \
+    && python -m pip install supervisor
+
+# Install nginx
+RUN apt update && apt install -y nginx
+
+# Launch a shell
+WORKDIR /
 CMD ["/bin/bash"]
 
 # vim: ft=dockerfile
