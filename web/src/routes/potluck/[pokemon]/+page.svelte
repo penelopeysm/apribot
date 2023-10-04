@@ -27,17 +27,13 @@
         usernameCol: string | null
     ) {
         if (usernameRow === null) {
-            console.log("Unhighlighting row");
             highlightedRow = null;
         } else {
-            console.log(`Highlighting row for ${usernameRow}`);
             highlightedRow = usernameRow;
         }
         if (usernameCol === null) {
-            console.log("Unhighlighting column");
             highlightedCol = null;
         } else {
-            console.log(`Highlighting column for ${usernameCol}`);
             highlightedCol = usernameCol;
         }
     }
@@ -151,13 +147,13 @@
                 {#each tableRow.giving as giving, j}
                     <td
                         on:mouseover={() => {
-                            setHighlighted(tableRow.username, users[j]);
+                            if (giving) setHighlighted(tableRow.username, users[j]);
                         }}
                         on:mouseout={() => {
                             setHighlighted(null, null);
                         }}
                         on:focus={() => {
-                            setHighlighted(tableRow.username, users[j]);
+                            if (giving) setHighlighted(tableRow.username, users[j]);
                         }}
                         on:blur={() => {
                             setHighlighted(null, null);
@@ -261,6 +257,7 @@
         transform: rotate(180deg);
         white-space: nowrap;
         min-height: min-content;
+        vertical-align: top;
     }
 
     .middle {
