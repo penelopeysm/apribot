@@ -467,7 +467,6 @@ respondLegality m = do
                     )
                     (M.assocs legalities)
                 )
-
       replyTo m Nothing message
     _ -> replyTo m Nothing "Found multiple matches: this should not happen, please let Penny know"
 
@@ -721,6 +720,8 @@ respondHelp m = do
         "  Show the hidden ability of a Pokémon",
         "- `!em {game} {pokemon}`",
         "  Show egg moves for a Pokémon in a game. `{game}` can be `usum`, `bdsp`, `swsh`, or `sv`. If you use this command in a DM with the bot, it will also list potential parents.",
+        "- `!legality {pokemon}`",
+        "  Show ball legality for a Pokémon across all available games.",
         "- `!nature {pokemon}`",
         "  Show suggested natures for a Pokémon (collated from a couple of spreadsheets).",
         "- `!potluck1`",
