@@ -17,6 +17,7 @@ module Trans
     Control.Monad.IO.Class.liftIO,
     Control.Monad.Reader.ask,
     Control.Monad.Reader.asks,
+    Control.Monad.Reader.local,
     Control.Monad.Reader.ReaderT (..),
     Control.Monad.forever,
     Control.Monad.void,
@@ -30,7 +31,7 @@ import Control.Concurrent (MVar, withMVar)
 import Control.Exception (bracket)
 import Control.Monad (forever, void, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Monad.Reader (MonadReader, MonadTrans, ReaderT, ask, asks, lift, runReaderT)
+import Control.Monad.Reader (MonadReader, MonadTrans, ReaderT, ask, asks, lift, runReaderT, local)
 import Database.PostgreSQL.Simple (Connection, close)
 import Reddit (Credentials (..), RedditEnv, authenticate)
 

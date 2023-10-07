@@ -15,6 +15,7 @@ module DiscordBot (notifyDiscord, discordBot) where
 import Control.Concurrent (forkIO)
 import Control.Concurrent.Chan (readChan, writeChan)
 import Control.Monad (forM, forM_)
+import Control.Monad.IO.Class (MonadIO (..))
 import Data.Char.WCWidth (wcwidth)
 import Data.List (nub, sortOn)
 import Data.Map.Strict (Map)
@@ -41,6 +42,11 @@ import Utils (makeTable)
 mkId :: Word64 -> DiscordId a
 mkId = DiscordId . Snowflake
 
+withContext :: (Monad m) => Text -> App m a -> App m a
+withContext newCtx = local $ \ctx ->
+  let existing = cfgContext ctx
+   in ctx {cfgContext = existing <> ":" <> newCtx}
+
 -- | Run the Discord bot.
 discordBot :: App IO ()
 discordBot = do
@@ -58,7 +64,7 @@ discordBot = do
 
 -- | Actions to run on startup.
 startup :: App DiscordHandler ()
-startup = do
+startup = withContext "startup" $ do
   cfg <- ask
   hdl <- lift ask
   -- Start notification loop (awkward types because unlift and lift)
@@ -69,7 +75,7 @@ startup = do
   restCall_ $
     DR.CreateMessage
       (cfgLogChannelId cfg)
-      ("ApriBot started on " <> platform <> " at: <t:" <> T.pack (show now) <> ">")
+      ("ApriBot started on " <> platform <> " at: <t:" <> tshow now <> ">")
 
 -- | Discord event handler. Right now, this does two things:
 --
@@ -78,7 +84,7 @@ startup = do
 --    time, but the idea is that we might want to respond to other events in the
 --    future.
 eventHandler :: Event -> App DiscordHandler ()
-eventHandler e = do
+eventHandler e = withContext "eventHandler" $ do
   -- Print if it's not a GuildCreate
   case e of
     GuildCreate {} -> pure ()
@@ -115,15 +121,21 @@ eventHandler e = do
 -- | This function is exported to allow the Reddit bot to talk to this module.
 -- It adds the post to the MVar, which effectively triggers channelLoop to post
 -- a message to Discord.
-notifyDiscord :: NotifyEvent -> App IO ()
+notifyDiscord :: (MonadIO m) => NotifyEvent -> App m ()
 notifyDiscord e = do
+  -- If e is a Log event, prefix it with the current execution context
+  e' <- case e of
+    Log msg -> do
+      ctx <- asks cfgContext
+      pure $ Log $ ctx <> ": " <> msg
+    _ -> pure e
   chan <- asks cfgChan
-  liftIO $ writeChan chan e
+  liftIO $ writeChan chan e'
 
 -- | Loop which waits for a post to be added to the MVar. When one is added (via
 -- the 'notifyDiscord' function), this posts it to the Discord channel.
 notifyLoop :: App DiscordHandler ()
-notifyLoop = do
+notifyLoop = withContext "notifyLoop" $ do
   cfg <- ask
   -- Post the post into the appropriate channel, if it hasn't already been
   -- notified about
@@ -148,7 +160,7 @@ notifyLoop = do
               eitherMessage <- lift $ restCall $ DR.CreateMessageDetailed cid (makeMessageDetails post)
               case eitherMessage of
                 Left err -> do
-                  tellError err "notifyPost:1"
+                  withContext "notifyPost" $ tellError err
                 Right msg -> do
                   -- If it's a ptrades post, add it to the notified posts in the DB
                   when (T.toLower (postSubreddit post) == "pokemontrades") $
@@ -163,6 +175,11 @@ notifyLoop = do
         case notified of
           Nothing -> pure ()
           Just (chanId, msgId) -> restCall_ $ DR.DeleteMessage (chanId, msgId)
+  -- Post a log event to #apribot-logs in my server. The Text value that it's
+  -- called with must contain all relevant info, none of it is added by this
+  -- function
+  let logToDiscord :: Text -> App DiscordHandler ()
+      logToDiscord = restCall_ . DR.CreateMessage (cfgLogChannelId cfg)
   -- Loop
   let chan = cfgChan cfg
   forever $ do
@@ -175,6 +192,7 @@ notifyLoop = do
         notifyPost post
       NotifyPost post -> notifyPost post
       UnnotifyPostById pid -> unnotifyPost pid
+      Log t -> logToDiscord t
 
 createEmEmbedDescription :: EggMoveWithParents -> Text
 createEmEmbedDescription em' =
@@ -200,14 +218,14 @@ createEmEmbedDescription em' =
    in T.intercalate "\n\n" (emwpFlavorText em' : levelUpParents <> breedParents)
 
 respondNature :: Message -> App DiscordHandler ()
-respondNature m = do
+respondNature m = withContext ("respondNature (`" <> messageContent m <> "`)") $ do
   let msgText = T.strip (messageContent m)
       pkmn = T.strip . T.drop 7 $ msgText
       natureText = getRecommendedNatures pkmn
   replyTo m Nothing natureText
 
 respondEM :: Message -> App DiscordHandler ()
-respondEM m = do
+respondEM m = withContext ("respondEM (`" <> messageContent m <> "`)") $ do
   let msgWords = T.words . T.toLower . T.strip $ messageContent m
   -- Parse message contents first
   result <- case msgWords of
@@ -305,10 +323,6 @@ respondEM m = do
                               }
                           )
                       postSubsequentEms ys
-                  restCall_ $
-                    DR.CreateMessage
-                      (messageChannelId m)
-                      "(Note from Penny: Apribot's EM functionality recently underwent a major overhaul. The egg moves themselves should all be correct, but I'm not 100% sure about the parents. If you find any mistakes, please let me know. Thank you!)"
             else do
               -- Not in DMs
               ems <- getEmsNoParents game id'
@@ -318,7 +332,13 @@ respondEM m = do
                   replyTo m Nothing . T.pack $ printf "%s has no egg moves in %s" fullName (show game)
                 -- Egg moves
                 ems' -> do
-                  let emText = T.pack $ printf "%s egg moves in %s: %s" fullName (show game) (T.intercalate ", " (map emnpName ems'))
+                  let emText =
+                        T.pack $
+                          printf
+                            "%s egg moves in %s: %s\nFor full details about parents, use this command in a DM."
+                            fullName
+                            (show game)
+                            (T.intercalate ", " (map emnpName ems'))
                   let emEmbedShort =
                         def
                           { createEmbedTitle = "Descriptions",
@@ -338,7 +358,7 @@ respondEM m = do
         _ -> replyTo m Nothing "Found multiple matches: this should not happen, please let Penny know"
 
 respondHA :: Message -> App DiscordHandler ()
-respondHA m = do
+respondHA m = withContext ("respondHA (`" <> messageContent m <> "`)") $ do
   let msgText = T.strip (messageContent m)
       pkmn = T.strip . T.drop 3 $ msgText
       makeEmbed :: (Text, Text) -> Maybe CreateEmbed
@@ -409,8 +429,7 @@ respondHA m = do
           )
 
 respondLegality :: Message -> App DiscordHandler ()
-respondLegality m = do
-  atomically $ T.putStrLn "LEGALITY"
+respondLegality m = withContext ("respondLegality (`" <> messageContent m <> "`)") $ do
   let msgText = T.strip (messageContent m)
       pkmn = T.strip . T.drop 9 $ msgText
   -- Try to fetch the Pokemon first.
@@ -418,33 +437,17 @@ respondLegality m = do
   case pkmnDetails of
     [] -> replyTo m Nothing $ "No Pokémon with name '" <> pkmn <> "' found."
     [(pkmnId, pkmnName, pkmnForm, _)] -> do
-      apriGuildId <- asks cfgAprimarketGuildId
-      let onAprimarket :: Bool
-          onAprimarket = messageGuildId m == Just apriGuildId
       let showLegality :: GenLegality -> Text
           showLegality (GenLegality b d a s sp)
             | not (b || d || a || s || sp) = "No ball combos available"
             | otherwise =
-                if True
-                  then
-                    T.concat
-                      [ if b then "<:beastball:1132050100017959033>" else "",
-                        if d then "<:dreamball:1132050106200375416>" else "",
-                        if a then "<:fastball:1132050109073465414><:friendball:1132050111598436414><:heavyball:1132050112965775541><:levelball:1132050114765148260><:loveball:1132050117323661382><:lureball:1132050118481285220><:moonball:1132050120251281530>" else "",
-                        if s then "<:safariball:1132052412501344266>" else "",
-                        if sp then "<:sportball:1132050124823068752>" else ""
-                      ]
-                  else
-                    T.intercalate
-                      ", "
-                      ( catMaybes
-                          [ if b then Just "Beast" else Nothing,
-                            if d then Just "Dream" else Nothing,
-                            if a then Just "Apricorn" else Nothing,
-                            if s then Just "Safari" else Nothing,
-                            if sp then Just "Sport" else Nothing
-                          ]
-                      )
+                T.concat
+                  [ if b then "<:beastball:1132050100017959033>" else "",
+                    if d then "<:dreamball:1132050106200375416>" else "",
+                    if a then "<:fastball:1132050109073465414><:friendball:1132050111598436414><:heavyball:1132050112965775541><:levelball:1132050114765148260><:loveball:1132050117323661382><:lureball:1132050118481285220><:moonball:1132050120251281530>" else "",
+                    if s then "<:safariball:1132052412501344266>" else "",
+                    if sp then "<:sportball:1132050124823068752>" else ""
+                  ]
       let fullName = pkmnName <> maybe "" (\f -> " (" <> f <> ")") pkmnForm
       legalities <- getLegality pkmnId
       let message :: Text
@@ -461,7 +464,7 @@ respondLegality m = do
                             else ":x:"
                         )
                           <> " **"
-                          <> T.pack (show game)
+                          <> tshow game
                           <> "** "
                           <> if gameAvailability then showLegality legality else "Not available in game"
                     )
@@ -471,7 +474,7 @@ respondLegality m = do
     _ -> replyTo m Nothing "Found multiple matches: this should not happen, please let Penny know"
 
 respondPotluckVotes :: Message -> App DiscordHandler ()
-respondPotluckVotes m = do
+respondPotluckVotes m = withContext "respondPotluckVotes" $ do
   let canonicaliseEmoji e = case emojiName e of
         "beastball" -> Just "Bea"
         "dreamball" -> Just "Dre"
@@ -497,18 +500,20 @@ respondPotluckVotes m = do
         pure (emoji, messageReactionCount r)
   case eitherMsgs of
     Left e -> do
-      tellError e "respondPotluckVotes"
+      tellError e
       replyTo m Nothing "Could not fetch messages from #potluck-vote"
     Right msgs -> do
       let nonBotMsgs = filter (not . userIsBot . messageAuthor) msgs
           emojiOrder = ["Bea", "Dre", "Fas", "Fri", "Hea", "Lev", "Lov", "Lur", "Moo", "Saf", "Spo"]
       voteRows <- forM nonBotMsgs $ \msg ->
         do
-          let pad1 n | n < 10 = " " <> T.pack (show n)
-                     | otherwise = T.pack (show n)         -- Assume we don't go above 100 per ball
-          let pad2 n | n < 10 = "   " <> T.pack (show n)
-                     | n < 100 = "  " <> T.pack (show n)
-                     | otherwise = " " <> T.pack (show n)  -- Assume we don't go above 1000 in total
+          let pad1 n
+                | n < 10 = " " <> tshow n
+                | otherwise = tshow n -- Assume we don't go above 100 per ball
+          let pad2 n
+                | n < 10 = "   " <> tshow n
+                | n < 100 = "  " <> tshow n
+                | otherwise = " " <> tshow n -- Assume we don't go above 1000 in total
           let text = messageContent msg
           authorServerNick <- getUserNickFromMessage msg (Just guildId)
           let msgReactions = M.fromList $ mapMaybe extractValidReactionsWithCount (messageReactions msg)
@@ -525,7 +530,7 @@ respondPotluckVotes m = do
         table
 
 respondPotluckSignup :: Message -> App DiscordHandler ()
-respondPotluckSignup m = do
+respondPotluckSignup m = withContext "respondPotluckSignup" $ do
   let canonicaliseEmoji e = case emojiName e of
         "\128175" -> Just ("100" :: Text)
         "beastball" -> Just "Bea"
@@ -555,15 +560,15 @@ respondPotluckSignup m = do
           Just simpleName -> do
             let emoji = case emojiId e of
                   Nothing -> emojiName e -- Builtin emoji
-                  Just eid -> emojiName e <> ":" <> T.pack (show eid) -- Custom emoji
+                  Just eid -> emojiName e <> ":" <> tshow eid -- Custom emoji
             users <- lift $ restCall $ DR.GetReactions (plSignupChannelId, messageId latestMsg) emoji (100, DR.FirstUsers)
             case users of
               Right users' -> pure $ Just (simpleName, users')
               Left _ -> do
-                tellError e "respondPotluckSignup:1"
+                tellError e
                 pure Nothing
           Nothing -> do
-            tellError e "respondPotluckSignup:2"
+            tellError e
             pure Nothing
       -- Construct ASCII table
       let reactions = M.fromList . catMaybes $ maybeReactions
@@ -585,7 +590,7 @@ respondPotluckSignup m = do
     _ -> replyTo m Nothing "Could not get latest message from #potluck-signup"
 
 makeThread :: Message -> App DiscordHandler ()
-makeThread m = do
+makeThread m = withContext "makeThread" $ do
   cfg <- ask
   case messageReference m of
     Nothing -> replyTo m Nothing "You should use `!thread` when replying to your trading partner's message"
@@ -595,7 +600,7 @@ makeThread m = do
           eitherRepliedMsg <- lift $ restCall $ DR.GetChannelMessage (rcid, rmid)
           case eitherRepliedMsg of
             Left err1 -> do
-              tellError err1 "makeThread:1"
+              tellError err1
               replyTo m Nothing "Could not get info about the message you replied to."
             Right repliedMsg -> do
               let authorId1 = userId (messageAuthor m)
@@ -605,7 +610,7 @@ makeThread m = do
               eitherFirstMsg <- lift $ restCall $ DR.GetChannelMessages rcid (1, DR.AfterMessage (mkId 0))
               case eitherFirstMsg of
                 Left err2 -> do
-                  tellError err2 "makeThread:2"
+                  tellError err2
                   replyTo m Nothing "Could not get info about the first message in the channel."
                 Right [firstMsg] -> do
                   atomically $ print (messageAuthor firstMsg)
@@ -615,7 +620,7 @@ makeThread m = do
                       eitherChannel <- lift $ restCall $ DR.GetChannel rcid
                       case eitherChannel of
                         Left err3 -> do
-                          tellError err3 "makeThread:3"
+                          tellError err3
                           replyTo m Nothing "Could not get info about the channel you replied to."
                         Right chn@(ChannelPublicThread {}) -> do
                           case channelThreadName chn of
@@ -640,7 +645,7 @@ makeThread m = do
                                         }
                               case eitherNewThread of
                                 Left err4 -> do
-                                  tellError err4 "makeThread:4"
+                                  tellError err4
                                   replyTo m Nothing "Could not create thread."
                                 Right newThread -> do
                                   replyTo m (Just [authorId1, authorId2]) $ "Created thread for <@" <> tshow authorId1 <> "> and <@" <> tshow authorId2 <> "> at: " <> getChannelUrl newThread
@@ -673,13 +678,13 @@ makeThread m = do
         _ -> replyTo m Nothing "Could not get info about the message you replied to."
 
 closeThread :: Message -> App DiscordHandler ()
-closeThread m = do
+closeThread m = withContext "closeThread" $ do
   cfg <- ask
   let channelId = messageChannelId m
   eitherChannel <- lift $ restCall $ DR.GetChannel channelId
   case eitherChannel of
     Left err -> do
-      tellError err "closeThread"
+      tellError err
       replyTo m Nothing "Could not get info about the channel you replied in."
     Right chn@(ChannelPublicThread {}) -> do
       atomically $ print chn
@@ -711,7 +716,7 @@ closeThread m = do
       pure ()
 
 respondHelp :: Message -> App DiscordHandler ()
-respondHelp m = do
+respondHelp m = withContext "respondHelp" $ do
   votesChan <- asks cfgPotluckVotesChannelId
   signupChan <- asks cfgPotluckSignupChannelId
   replyTo m Nothing $
@@ -774,8 +779,21 @@ restCall_ req = do
   resp <- lift $ restCall req
   case resp of
     Left e -> do
-      tellError e "restCall_"
+      tellError e
     Right _ -> pure ()
+
+replyTo :: Message -> Maybe [UserId] -> Text -> App DiscordHandler ()
+replyTo m allowedMentions txt =
+  withContext "replyTo" $
+    restCall_ $
+      DR.CreateMessageDetailed
+        (messageChannelId m)
+        ( def
+            { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
+              DR.messageDetailedContent = txt,
+              DR.messageDetailedAllowedMentions = mentionOnly <$> allowedMentions
+            }
+        )
 
 cleanRedditMarkdown :: Text -> Text
 cleanRedditMarkdown = T.replace "#" "\\#" . T.replace "&#x200B;" "" . T.replace "&amp;" "&" . T.replace "&lt;" "<" . T.replace "&gt;" ">"
@@ -854,18 +872,6 @@ makeMessageDetails post =
           DR.messageDetailedContent = ""
         }
 
-replyTo :: Message -> Maybe [UserId] -> Text -> App DiscordHandler ()
-replyTo m allowedMentions txt =
-  restCall_ $
-    DR.CreateMessageDetailed
-      (messageChannelId m)
-      ( def
-          { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
-            DR.messageDetailedContent = txt,
-            DR.messageDetailedAllowedMentions = mentionOnly <$> allowedMentions
-          }
-      )
-
 tshow :: (Show a) => a -> Text
 tshow = T.pack . show
 
@@ -885,7 +891,7 @@ mentionOnly userIds =
 
 -- | Attempt to get user's server nickname. Falls back to global username.
 getUserNickFromMessage :: Message -> Maybe GuildId -> App DiscordHandler Text
-getUserNickFromMessage m maybeGid =
+getUserNickFromMessage m maybeGid = withContext "getUserNickFromMessage" $ do
   let auth = messageAuthor m
    in case maybeGid of
         Nothing -> pure $ userName auth
@@ -907,7 +913,7 @@ getUserNickFromMessage m maybeGid =
 --
 -- TODO: refactor to avoid code duplication with the above
 getUserNick :: User -> Maybe GuildId -> App DiscordHandler Text
-getUserNick u maybeGid =
+getUserNick u maybeGid = withContext "getUserNick" $ do
   case maybeGid of
     Nothing -> pure $ userName u
     Just gid -> do
@@ -926,7 +932,7 @@ truncateThreadTitle :: Text -> Text
 truncateThreadTitle t = if T.length t > 100 then T.take 97 t <> "..." else t
 
 replyWithFile :: Message -> Text -> Text -> Text -> App DiscordHandler ()
-replyWithFile m msgContents fname fcontents = do
+replyWithFile m msgContents fname fcontents = withContext "replyWithFile" $ do
   restCall_ $
     DR.CreateMessageDetailed
       (messageChannelId m)
@@ -938,12 +944,5 @@ replyWithFile m msgContents fname fcontents = do
           }
       )
 
-tellError :: (Show e) => e -> Text -> App DiscordHandler ()
-tellError e src = do
-  cfg <- ask
-  void $
-    lift $
-      restCall $
-        DR.CreateMessage
-          (cfgLogChannelId cfg)
-          ("Error in " <> src <> ": " <> T.pack (show e))
+tellError :: (Show e) => e -> App DiscordHandler ()
+tellError e = notifyDiscord (Log $ "Error: " <> tshow e)

@@ -20,6 +20,7 @@ data NotifyEvent
   = NotifyPost Post
   | NotifyPostById (ID Post)
   | UnnotifyPostById (ID Post)
+  | Log Text
   deriving (Show)
 
 data Config = Config
@@ -74,7 +75,9 @@ data Config = Config
     -- | Whether the app is running on Fly.io.
     cfgOnFly :: Bool,
     -- | Function to retrieve PostgreSQL connection string
-    cfgPsqlConn :: IO PSQL.Connection
+    cfgPsqlConn :: IO PSQL.Connection,
+    -- | Current execution context, for logging
+    cfgContext :: Text
   }
 
 -- | App configuration.
@@ -111,6 +114,8 @@ getConfig = do
       cfgRedditStreamDelay = 10
   cfgLock <- newMVar ()
   cfgChan <- newChan
+
+  let cfgContext = "apribot"
 
   let cfgPsqlConn =
         if cfgOnFly
