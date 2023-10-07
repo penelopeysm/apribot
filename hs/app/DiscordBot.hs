@@ -425,14 +425,14 @@ respondLegality m = do
           showLegality (GenLegality b d a s sp)
             | not (b || d || a || s || sp) = "No ball combos available"
             | otherwise =
-                if onAprimarket
+                if True
                   then
                     T.concat
-                      [ if b then ":beastball:" else "",
-                        if d then ":dreamball:" else "",
-                        if a then ":fastball::friendball::heavyball::levelball::loveball::lureball::moonball::" else "",
-                        if s then ":safariball:" else "",
-                        if sp then ":sportball:" else ""
+                      [ if b then "<:beastball:1132050100017959033>" else "",
+                        if d then "<:dreamball:1132050106200375416>" else "",
+                        if a then "<:fastball:1132050109073465414><:friendball:1132050111598436414><:heavyball:1132050112965775541><:levelball:1132050114765148260><:loveball:1132050117323661382><:lureball:1132050118481285220><:moonball:1132050120251281530>" else "",
+                        if s then "<:safariball:1132052412501344266>" else "",
+                        if sp then "<:sportball:1132050124823068752>" else ""
                       ]
                   else
                     T.intercalate
@@ -504,8 +504,11 @@ respondPotluckVotes m = do
           emojiOrder = ["Bea", "Dre", "Fas", "Fri", "Hea", "Lev", "Lov", "Lur", "Moo", "Saf", "Spo"]
       voteRows <- forM nonBotMsgs $ \msg ->
         do
-          let pad1 n = if n < 10 then " " <> T.pack (show n) else T.pack (show n)
-          let pad2 n = if n < 100 then "  " <> T.pack (show n) else T.pack (show n)
+          let pad1 n | n < 10 = " " <> T.pack (show n)
+                     | otherwise = T.pack (show n)         -- Assume we don't go above 100 per ball
+          let pad2 n | n < 10 = "   " <> T.pack (show n)
+                     | n < 100 = "  " <> T.pack (show n)
+                     | otherwise = " " <> T.pack (show n)  -- Assume we don't go above 1000 in total
           let text = messageContent msg
           authorServerNick <- getUserNickFromMessage msg (Just guildId)
           let msgReactions = M.fromList $ mapMaybe extractValidReactionsWithCount (messageReactions msg)
