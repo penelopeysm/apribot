@@ -11,10 +11,11 @@ makeNatureText title mons =
 
 getRecommendedNatures :: Text -> Text
 getRecommendedNatures searchString =
-  let p = filter (\(name, _) -> searchString `T.isInfixOf` name) penny
-      jSwsh = filter (\(name, _) -> searchString `T.isInfixOf` name) jemmaSwSh
-      jBdsp = filter (\(name, _) -> searchString `T.isInfixOf` name) jemmaBdsp
-      jG7 = filter (\(name, _) -> searchString `T.isInfixOf` name) jemmaG7
+  let s = T.toLower searchString
+      p = filter (\(name, _) -> s `T.isInfixOf` name) penny
+      jSwsh = filter (\(name, _) -> s `T.isInfixOf` name) jemmaSwSh
+      jBdsp = filter (\(name, _) -> s `T.isInfixOf` name) jemmaBdsp
+      jG7 = filter (\(name, _) -> s `T.isInfixOf` name) jemmaG7
    in case makeNatureText "Natures in Penny's sheet (mostly from Pikalytics):" p
         <> makeNatureText "Natures in Jemma's SwSh sheet (from Smogon):" jSwsh
         <> makeNatureText "Natures in Jemma's BDSP sheet (from Smogon):" jBdsp
