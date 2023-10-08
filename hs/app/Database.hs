@@ -216,18 +216,18 @@ addNotifiedPost postId channelId messageId = withAppPsqlConn $ \conn -> do
         T.pack . show . unSnowflake . unId $ messageId
       )
 
-checkNotifiedStatus :: (MonadIO m) => ID Post -> App m (Maybe (ChannelId, MessageId))
+checkNotifiedStatus :: (MonadIO m) => ID Post -> App m (Maybe MessageId)
 checkNotifiedStatus postId = do
   notified <- withAppPsqlConn $ \conn -> do
     query
       conn
-      "SELECT channel_id, message_id FROM discord WHERE post_id = ?"
+      "SELECT message_id FROM discord WHERE post_id = ?"
       (Only (unPostID postId))
   atomically $ print notified
   case notified of
     [] -> pure Nothing
-    (channelId, messageId) : _ ->
-      pure $ Just (DiscordId . read . T.unpack $ channelId, DiscordId . read . T.unpack $ messageId)
+    Only messageId : _ ->
+      pure $ Just $ DiscordId . read . T.unpack $ messageId
 
 -- tokens.db
 serialiseToken :: Token -> (Text, Text, UTCTime, Text, Text)

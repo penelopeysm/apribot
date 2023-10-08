@@ -172,9 +172,10 @@ notifyLoop = withContext "notifyLoop" $ do
   let unnotifyPost :: ID Post -> App DiscordHandler ()
       unnotifyPost pid = do
         notified <- checkNotifiedStatus pid
+        chanId <- asks cfgPtrChannelId
         case notified of
           Nothing -> pure ()
-          Just (chanId, msgId) -> restCall_ $ DR.DeleteMessage (chanId, msgId)
+          Just msgId -> restCall_ $ DR.DeleteMessage (chanId, msgId)
   -- Post a log event to #apribot-logs in my server. The Text value that it's
   -- called with must contain all relevant info, none of it is added by this
   -- function
