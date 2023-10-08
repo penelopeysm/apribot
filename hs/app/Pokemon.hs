@@ -68,26 +68,20 @@ randomAbility = do
     [(name, flavorText)] -> pure (name, flavorText)
     _ -> sqlError "randomAbility: could not get random ability from database"
 
-ha :: (MonadIO m) => Text -> App m [(Text, Maybe (Text, Text))]
-ha name = do
-  dbHits :: [(Text, Maybe Text, Maybe Text, Maybe Text)] <-
-    withAppPsqlConn $ \conn ->
-      query
-        conn
-        [sql|SELECT p.name, p.form, a.name, a.flavor_text
+ha :: (MonadIO m) => Int -> App m (Maybe (Text, Text))
+ha pkmnId = do
+  result <- withAppPsqlConn $ \conn ->
+    query
+      conn
+      [sql|SELECT a.name, a.flavor_text
              FROM pokemon p LEFT OUTER JOIN abilities a
              ON p.ha_id = a.id
-             WHERE p.unique_name ILIKE ?;|]
-        (Only $ "%" <> name <> "%")
-  mapM
-    ( \(pname, pform, aname, atext) -> do
-        let fullName = makeName pname pform
-        case (aname, atext) of
-          (Just nm, Just tx) -> pure (fullName, Just (nm, tx))
-          (Nothing, Nothing) -> pure (fullName, Nothing)
-          _ -> sqlError $ "Invalid database entry for hidden ability " <> name <> ": " <> T.pack (show (aname, atext))
-    )
-    dbHits
+             WHERE p.id = ?;|]
+      (Only pkmnId)
+  case result of
+    [(Just name, Just flavorText)] -> pure $ Just (name, flavorText)
+    [(Nothing, Nothing)] -> pure Nothing
+    _ -> error $ "HA query returned invalid results (this should not happen!): " <> show result
 
 -- * Egg moves
 
@@ -125,16 +119,16 @@ randomMoves = do
              LIMIT ?;|]
       (Only nMoves)
 
--- TODO: We should fix the special cases in the database
 getPokemonIdsAndDetails :: (MonadIO m) => Text -> App m [(Int, Text, Maybe Text, Text)]
 getPokemonIdsAndDetails name = do
+  let hyphenatedName = T.intercalate "-" $ T.words name
   withAppPsqlConn $ \conn ->
     query
       conn
       [sql|SELECT id, name, form, unique_name
              FROM pokemon
              WHERE unique_name ILIKE ?;|]
-      (Only name)
+      (Only hyphenatedName)
 
 getEmsNoParents :: (MonadIO m) => Game -> Int -> App m [EggMoveNoParents]
 getEmsNoParents game pkmnId = do

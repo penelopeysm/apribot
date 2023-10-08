@@ -376,8 +376,9 @@ respondHA m = withContext ("respondHA (`" <> messageContent m <> "`)") $ do
                       <> "_(Ability)",
                   createEmbedColor = Just DiscordColorLuminousVividPink
                 }
-  haDetails <- ha (T.intercalate "-" . T.words $ pkmn)
-  case haDetails of
+  -- Try to fetch the Pokemon first. If it can't be found, choose some random moves
+  pkmnDetails <- getPokemonIdsAndDetails pkmn
+  case pkmnDetails of
     -- Not a Pokemon
     [] -> do
       (ha', desc') <- randomAbility
@@ -392,41 +393,30 @@ respondHA m = withContext ("respondHA (`" <> messageContent m <> "`)") $ do
                 DR.messageDetailedEmbeds = (: []) <$> makeEmbed (ha', desc')
               }
           )
-    -- One species that has a HA
-    [(name, Just (ha', desc'))] -> do
+    -- One species
+    [(pkmnId, name, form, _)] -> do
+      let fullName = name <> maybe "" (\f -> " (" <> f <> ")") form
       let piplupDisclaimer =
             if name `elem` ["Piplup", "Prinplup", "Empoleon"]
               then "\n(Note that prior to SV, the Piplup family had Defiant as their HA.)"
               else ""
-      restCall_ $
-        DR.CreateMessageDetailed
-          (messageChannelId m)
-          ( def
-              { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
-                DR.messageDetailedContent = name <> "'s hidden ability is: " <> ha' <> piplupDisclaimer,
-                DR.messageDetailedAllowedMentions = Nothing,
-                DR.messageDetailedEmbeds = (: []) <$> makeEmbed (ha', desc')
-              }
-          )
-    -- One species with no HA
-    [(name, Nothing)] -> replyTo m Nothing $ name <> " has no hidden ability"
-    -- Multiple species
-    species -> do
-      let makeText (name, Nothing) = name <> " has no hidden ability"
-          makeText (name, Just (ha', _)) = name <> "'s hidden ability is: " <> ha'
-          messageText = T.intercalate "\n" (map makeText species)
-          uniqueHAs = nub $ mapMaybe snd species
-          embeds = mapMaybe makeEmbed uniqueHAs
-      restCall_ $
-        DR.CreateMessageDetailed
-          (messageChannelId m)
-          ( def
-              { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
-                DR.messageDetailedContent = messageText,
-                DR.messageDetailedAllowedMentions = Nothing,
-                DR.messageDetailedEmbeds = Just embeds
-              }
-          )
+      haAndFlavorText <- ha pkmnId
+      case haAndFlavorText of
+        -- No HA
+        Nothing -> replyTo m Nothing $ fullName <> " has no hidden ability."
+        -- HA
+        Just (ha', desc') -> do
+          restCall_ $
+            DR.CreateMessageDetailed
+              (messageChannelId m)
+              ( def
+                  { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
+                    DR.messageDetailedContent = fullName <> "'s hidden ability is: " <> ha' <> piplupDisclaimer,
+                    DR.messageDetailedAllowedMentions = Nothing,
+                    DR.messageDetailedEmbeds = (: []) <$> makeEmbed (ha', desc')
+                  }
+              )
+    _ -> replyTo m Nothing "Found multiple matches: this should not happen, please let Penny know"
 
 respondLegality :: Message -> App DiscordHandler ()
 respondLegality m = withContext ("respondLegality (`" <> messageContent m <> "`)") $ do
