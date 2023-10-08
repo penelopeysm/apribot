@@ -252,7 +252,7 @@ respondNature m = withContext ("respondNature (`" <> messageContent m <> "`)") $
                   <> case jemmaG7 sn of
                     Nothing -> ""
                     Just n -> "\nJemma's G7 sheet (Smogon): " <> n
-                  <> "\nOriginal sheets: https://tinyurl.com/tgkss"
+                  <> "\n(Penny's sheet is at https://tinyurl.com/tgkss; Jemma's sheets have been lost to time.)"
           replyTo m Nothing text
     _ -> replyTo m Nothing "Found multiple matches: this should not happen, please let Penny know"
 
