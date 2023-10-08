@@ -70,7 +70,6 @@ executable apribot
     other-modules:    Config,
                       Database,
                       DiscordBot,
-                      Natures,
                       Paths_apribot,
                       Pokemon,
                       RedditBot,
