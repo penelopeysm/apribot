@@ -32,7 +32,6 @@ import Database (addNotifiedPost, checkNotifiedStatus)
 import Discord
 import qualified Discord.Requests as DR
 import Discord.Types
-import Natures (getRecommendedNatures)
 import Pokemon
 import Reddit (ID (..), Post (..), getPost, runRedditT)
 import Text.Printf (printf)
@@ -41,6 +40,10 @@ import Utils (makeTable)
 
 mkId :: Word64 -> DiscordId a
 mkId = DiscordId . Snowflake
+
+mkFullName :: Text -> Maybe Text -> Text
+mkFullName name Nothing = name
+mkFullName name (Just form) = name <> " (" <> form <> ")"
 
 withContext :: (Monad m) => Text -> App m a -> App m a
 withContext newCtx = local $ \ctx ->
@@ -222,8 +225,36 @@ respondNature :: Message -> App DiscordHandler ()
 respondNature m = withContext ("respondNature (`" <> messageContent m <> "`)") $ do
   let msgText = T.strip (messageContent m)
       pkmn = T.strip . T.drop 7 $ msgText
-      natureText = getRecommendedNatures pkmn
-  replyTo m Nothing natureText
+  -- Try to fetch the Pokemon first.
+  pkmnDetails <- getPokemonIdsAndDetails pkmn
+  case pkmnDetails of
+    [] -> replyTo m Nothing $ "No Pokémon with name '" <> pkmn <> "' found."
+    [(pkmnId, pkmnName, pkmnForm, _)] -> do
+      let fullName = mkFullName pkmnName pkmnForm
+      suggestedNatures <- getSuggestedNatures pkmnId
+      liftIO $ T.putStrLn "hi2"
+      case suggestedNatures of
+        Nothing -> replyTo m Nothing $ "No suggested natures found for " <> fullName <> "."
+        Just sn -> do
+          let text =
+                "Suggested natures for "
+                  <> fullName
+                  <> ":"
+                  <> case penny sn of
+                    Nothing -> ""
+                    Just n -> "\nPenny's sheet (mostly Pikalytics): " <> n
+                  <> case jemmaSwSh sn of
+                    Nothing -> ""
+                    Just n -> "\nJemma's SwSh sheet (Smogon): " <> n
+                  <> case jemmaBDSP sn of
+                    Nothing -> ""
+                    Just n -> "\nJemma's BDSP sheet (Smogon): " <> n
+                  <> case jemmaG7 sn of
+                    Nothing -> ""
+                    Just n -> "\nJemma's G7 sheet (Smogon): " <> n
+                  <> "\nOriginal sheets: https://tinyurl.com/tgkss"
+          replyTo m Nothing text
+    _ -> replyTo m Nothing "Found multiple matches: this should not happen, please let Penny know"
 
 respondEM :: Message -> App DiscordHandler ()
 respondEM m = withContext ("respondEM (`" <> messageContent m <> "`)") $ do
@@ -271,7 +302,7 @@ respondEM m = withContext ("respondEM (`" <> messageContent m <> "`)") $ do
               )
         -- One exact match found. Calculate egg moves
         [(id', name, form, _)] -> do
-          let fullName = name <> maybe "" (\f -> " (" <> f <> ")") form
+          let fullName = mkFullName name form
           -- Check if the message is in a DM
           channel <- lift $ restCall $ DR.GetChannel (messageChannelId m)
           let isDm = case channel of
@@ -396,7 +427,7 @@ respondHA m = withContext ("respondHA (`" <> messageContent m <> "`)") $ do
           )
     -- One species
     [(pkmnId, name, form, _)] -> do
-      let fullName = name <> maybe "" (\f -> " (" <> f <> ")") form
+      let fullName = mkFullName name form
       let piplupDisclaimer =
             if name `elem` ["Piplup", "Prinplup", "Empoleon"]
               then "\n(Note that prior to SV, the Piplup family had Defiant as their HA.)"
@@ -438,7 +469,7 @@ respondLegality m = withContext ("respondLegality (`" <> messageContent m <> "`)
                 if s then "<:safariball:1132052412501344266>" else "",
                 if sp then "<:sportball:1132050124823068752>" else ""
               ]
-      let fullName = pkmnName <> maybe "" (\f -> " (" <> f <> ")") pkmnForm
+      let fullName = mkFullName pkmnName pkmnForm
       legalities <- getLegality pkmnId
       let message :: Text
           message =

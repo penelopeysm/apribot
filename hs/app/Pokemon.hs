@@ -17,6 +17,8 @@ module Pokemon
     getLegality,
     GenLegality (..),
     isPokemonUnbreedable,
+    SuggestedNature (..),
+    getSuggestedNatures,
   )
 where
 
@@ -429,3 +431,25 @@ isPokemonUnbreedable pkmnId = do
     [Only True] -> pure True
     [Only False] -> pure False
     _ -> error "isPokemonUnbreedable: expected exactly one Boolean result"
+
+-- * Natures
+
+data SuggestedNature = SuggestedNature {
+  penny :: Maybe Text,
+  jemmaSwSh :: Maybe Text,
+  jemmaBDSP :: Maybe Text,
+  jemmaG7 :: Maybe Text
+}
+
+getSuggestedNatures :: (MonadIO m) => Int -> App m (Maybe SuggestedNature)
+getSuggestedNatures pkmnId = do
+    suggestedNatures <- withAppPsqlConn $ \conn ->
+      query
+        conn
+        [sql|SELECT penny, jemma_swsh, jemma_bdsp, jemma_g7 FROM natures WHERE pokemon_id = ?;|]
+        (Only pkmnId)
+    liftIO $ print suggestedNatures
+    case suggestedNatures of
+         [] -> pure Nothing
+         [(p, js, jb, j7)] -> pure $ Just $ SuggestedNature p js jb j7
+         _ -> error "getNatures: got more than one set of suggested natures"
