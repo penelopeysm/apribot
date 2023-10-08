@@ -427,36 +427,40 @@ respondLegality m = withContext ("respondLegality (`" <> messageContent m <> "`)
   case pkmnDetails of
     [] -> replyTo m Nothing $ "No Pokémon with name '" <> pkmn <> "' found."
     [(pkmnId, pkmnName, pkmnForm, _)] -> do
+      unbreedable <- isPokemonUnbreedable pkmnId
       let showLegality :: GenLegality -> Text
-          showLegality (GenLegality b d a s sp)
-            | not (b || d || a || s || sp) = "No ball combos available"
-            | otherwise =
-                T.concat
-                  [ if b then "<:beastball:1132050100017959033>" else "",
-                    if d then "<:dreamball:1132050106200375416>" else "",
-                    if a then "<:fastball:1132050109073465414><:friendball:1132050111598436414><:heavyball:1132050112965775541><:levelball:1132050114765148260><:loveball:1132050117323661382><:lureball:1132050118481285220><:moonball:1132050120251281530>" else "",
-                    if s then "<:safariball:1132052412501344266>" else "",
-                    if sp then "<:sportball:1132050124823068752>" else ""
-                  ]
+          showLegality (GenLegality b d a s sp) =
+            T.concat
+              [ if b then "<:beastball:1132050100017959033>" else "",
+                if d then "<:dreamball:1132050106200375416>" else "",
+                if a then "<:fastball:1132050109073465414><:friendball:1132050111598436414><:heavyball:1132050112965775541><:levelball:1132050114765148260><:loveball:1132050117323661382><:lureball:1132050118481285220><:moonball:1132050120251281530>" else "",
+                if s then "<:safariball:1132052412501344266>" else "",
+                if sp then "<:sportball:1132050124823068752>" else ""
+              ]
       let fullName = pkmnName <> maybe "" (\f -> " (" <> f <> ")") pkmnForm
       legalities <- getLegality pkmnId
       let message :: Text
           message =
-            "Ball legality for "
-              <> fullName
-              <> "\n"
+            fullName
+              <> " legality:\n"
               <> T.intercalate
                 "\n"
                 ( map
-                    ( \(game, (gameAvailability, legality)) ->
-                        ( if gameAvailability
+                    ( \(game, (availableInGame, legality)) ->
+                        ( if availableInGame
                             then ":white_check_mark:"
                             else ":x:"
                         )
                           <> " **"
                           <> tshow game
                           <> "** "
-                          <> if gameAvailability then showLegality legality else "Not available in game"
+                          <> case (availableInGame, unbreedable) of
+                            (False, _) -> "Not available in game"
+                            (True, True) -> "Cannot be bred"
+                            (True, False) ->
+                              if legality == GenLegality False False False False False
+                                then "No ball combos available"
+                                else showLegality legality
                     )
                     (M.assocs legalities)
                 )

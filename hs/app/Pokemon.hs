@@ -16,6 +16,7 @@ module Pokemon
     SqlException (..),
     getLegality,
     GenLegality (..),
+    isPokemonUnbreedable,
   )
 where
 
@@ -396,10 +397,35 @@ getLegality pkmnId = do
                  GROUP BY g.id;|]
           (Only pkmnId)
       pure $ map (\case Only (1 :: Int) -> USUM; Only 2 -> SwSh; Only 3 -> BDSP; Only 4 -> SV; _ -> error "getLegality: unexpected game") gameIds
+
   pure $
     M.fromList
       [ (USUM, (USUM `elem` gamesAvailableIn, bank baseLegality `genLegalityAndBool` (USUM `elem` gamesAvailableIn))),
         (SwSh, (SwSh `elem` gamesAvailableIn, home baseLegality `genLegalityAndBool` (SwSh `elem` gamesAvailableIn))),
-        (BDSP, (BDSP `elem` gamesAvailableIn, home baseLegality `genLegalityAndBool` (BDSP `elem` gamesAvailableIn))),
+        if pkmnId == 405 -- Spinda
+          then (BDSP, (True, GenLegality False False True False False))
+          else (BDSP, (BDSP `elem` gamesAvailableIn, home baseLegality `genLegalityAndBool` (BDSP `elem` gamesAvailableIn))),
         (SV, (SV `elem` gamesAvailableIn, home baseLegality `genLegalityAndBool` (SV `elem` gamesAvailableIn)))
       ]
+
+isPokemonUnbreedable :: (MonadIO m) => Int -> App m Bool
+isPokemonUnbreedable pkmnId = do
+  result <- withAppPsqlConn $ \conn ->
+    query
+      conn
+      [sql|SELECT EXISTS(
+           SELECT *
+            FROM pokemon as p
+           WHERE p.eg1_id IN (13, 15)   -- Ditto / Undiscovered
+                 AND -- Doesn't evolve
+                   (p.evolution_family_id IS NULL     -- Doesn't evolve
+                     -- All members of evolution family are undiscovered
+                     OR NOT EXISTS(SELECT * FROM pokemon as p2
+                                    WHERE p.evolution_family_id = p2.evolution_family_id
+                                      AND p2.eg1_id NOT IN (13, 15)))
+                 AND p.id = ?);|]
+      (Only pkmnId)
+  case result of
+    [Only True] -> pure True
+    [Only False] -> pure False
+    _ -> error "isPokemonUnbreedable: expected exactly one Boolean result"
