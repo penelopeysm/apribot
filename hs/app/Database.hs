@@ -32,6 +32,8 @@
 --    - scopes     : Text
 module Database
   ( addToDb,
+    PokemonDetails (..),
+    getAllNames,
     getLatestHits,
     getLatestNonHits,
     wasHit,
@@ -292,3 +294,19 @@ updateToken identifier tkn = withAppPsqlConn $ \conn -> do
       conn
       "UPDATE tokens SET token = ?, token_type = ?, expires_at = ?, scopes = ? WHERE id = ?;"
       (token, tokenType, expiresAt, scopes, identifier)
+
+data PokemonDetails = PokemonDetails
+  { pkmn_id :: Int,
+    pkmn_name :: Text,
+    pkmn_form :: Maybe Text,
+    pkmn_unique_name :: Text
+  }
+  deriving (Generic, Show)
+
+instance ToJSON PokemonDetails where
+  toJSON = genericToJSON $ defaultOptions {fieldLabelModifier = drop 5}
+
+getAllNames :: (MonadIO m) => App m [PokemonDetails]
+getAllNames = withAppPsqlConn $ \conn -> do
+  results <- query_ conn "SELECT id, name, form, unique_name FROM pokemon ORDER BY ndex ASC;"
+  pure $ map (\(a, b, c, d) -> PokemonDetails a b c d) results

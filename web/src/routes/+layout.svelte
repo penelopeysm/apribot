@@ -2,18 +2,12 @@
     import { page } from "$app/stores";
     export let data;
 
-    const links =
-        data.username === null
-            ? [
-                  ["/", "home"],
-                  ["/contribute", "contribute"],
-                  ["/privacy", "privacy"],
-              ]
-            : [
-                  ["/", "home"],
-                  ["/contribute", "contribute"],
-                  ["/privacy", "privacy"],
-              ];
+    const links = [
+        ["/", "home"],
+        ["/contribute", "contribute"],
+        ["/privacy", "privacy"],
+        ["/names", "names"],
+    ];
 </script>
 
 <nav>

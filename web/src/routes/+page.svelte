@@ -9,7 +9,7 @@
 
 <h1>ApriBot</h1>
 
-<div class="prose">
+<div>
     <p>
         ApriBot is a bot for the Aprimarket Discord server, a trading hub for
         Pokémon in Apricorn and other rare balls. (Are you not a member of the
