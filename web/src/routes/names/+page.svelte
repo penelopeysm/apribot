@@ -59,7 +59,7 @@
         font-size: 120%;
         margin-bottom: 1em;
     }
-    
+
     .name {
         min-width: 120px;
         width: 120px;
@@ -76,7 +76,7 @@
     }
 
     td.unique-name {
-        font-family: monospace;
+        font-family: "Fira Mono", monospace;
         font-weight: bold;
         font-size: 120%;
     }

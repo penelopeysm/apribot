@@ -36,15 +36,8 @@
         extra data!
     </p>
 
-    <div id="login-link-container">
-        <a href="/login" id="login-link">Log in with Reddit</a>
-    </div>
-
-    <p>
-        ApriBot uses cookies only to log you in and to keep you logged in. By
-        logging in, it is assumed that you consent to this. See the <a
-            href="/privacy">privacy page</a
-        > for more information.
+    <p class="strong">
+        Please log in with Reddit (in the top-right corner) to continue.
     </p>
 {:else}
     <p>
@@ -52,3 +45,9 @@
         a proper frontend framework.
     </p>
 {/if}
+
+<style>
+    .strong {
+        font-weight: bold;
+    }
+</style>
