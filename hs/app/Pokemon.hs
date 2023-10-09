@@ -55,6 +55,23 @@ makeName name form = case form of
   Just f | otherwise -> name <> " (" <> f <> ")"
   Nothing -> name
 
+-- * General helpers
+
+getPokemonIdsAndDetails :: (MonadIO m) => Text -> App m (Maybe (Int, Text, Maybe Text, Text))
+getPokemonIdsAndDetails name = do
+  let hyphenatedName = T.intercalate "-" $ T.words name
+  results <- withAppPsqlConn $ \conn ->
+    query
+      conn
+      [sql|SELECT id, name, form, unique_name
+             FROM pokemon
+             WHERE unique_name ILIKE ?;|]
+      (Only hyphenatedName)
+  case results of
+    [] -> pure Nothing
+    [x] -> pure (Just x)
+    _ -> error "getPokemonIdsAndDetails: multiple results returned"
+
 -- * Hidden abilities (Rewritten to use PostgreSQL backend)
 
 -- | Generate a random ability.
@@ -121,17 +138,6 @@ randomMoves = do
              ORDER BY RANDOM()
              LIMIT ?;|]
       (Only nMoves)
-
-getPokemonIdsAndDetails :: (MonadIO m) => Text -> App m [(Int, Text, Maybe Text, Text)]
-getPokemonIdsAndDetails name = do
-  let hyphenatedName = T.intercalate "-" $ T.words name
-  withAppPsqlConn $ \conn ->
-    query
-      conn
-      [sql|SELECT id, name, form, unique_name
-             FROM pokemon
-             WHERE unique_name ILIKE ?;|]
-      (Only hyphenatedName)
 
 getEmsNoParents :: (MonadIO m) => Game -> Int -> App m [EggMoveNoParents]
 getEmsNoParents game pkmnId = do
@@ -434,22 +440,22 @@ isPokemonUnbreedable pkmnId = do
 
 -- * Natures
 
-data SuggestedNature = SuggestedNature {
-  penny :: Maybe Text,
-  jemmaSwSh :: Maybe Text,
-  jemmaBDSP :: Maybe Text,
-  jemmaG7 :: Maybe Text
-}
+data SuggestedNature = SuggestedNature
+  { penny :: Maybe Text,
+    jemmaSwSh :: Maybe Text,
+    jemmaBDSP :: Maybe Text,
+    jemmaG7 :: Maybe Text
+  }
 
 getSuggestedNatures :: (MonadIO m) => Int -> App m (Maybe SuggestedNature)
 getSuggestedNatures pkmnId = do
-    suggestedNatures <- withAppPsqlConn $ \conn ->
-      query
-        conn
-        [sql|SELECT penny, jemma_swsh, jemma_bdsp, jemma_g7 FROM natures WHERE pokemon_id = ?;|]
-        (Only pkmnId)
-    liftIO $ print suggestedNatures
-    case suggestedNatures of
-         [] -> pure Nothing
-         [(p, js, jb, j7)] -> pure $ Just $ SuggestedNature p js jb j7
-         _ -> error "getNatures: got more than one set of suggested natures"
+  suggestedNatures <- withAppPsqlConn $ \conn ->
+    query
+      conn
+      [sql|SELECT penny, jemma_swsh, jemma_bdsp, jemma_g7 FROM natures WHERE pokemon_id = ?;|]
+      (Only pkmnId)
+  liftIO $ print suggestedNatures
+  case suggestedNatures of
+    [] -> pure Nothing
+    [(p, js, jb, j7)] -> pure $ Just $ SuggestedNature p js jb j7
+    _ -> error "getNatures: got more than one set of suggested natures"

@@ -228,8 +228,8 @@ respondNature m = withContext ("respondNature (`" <> messageContent m <> "`)") $
   -- Try to fetch the Pokemon first.
   pkmnDetails <- getPokemonIdsAndDetails pkmn
   case pkmnDetails of
-    [] -> replyTo m Nothing $ "No Pokémon with name '" <> pkmn <> "' found."
-    [(pkmnId, pkmnName, pkmnForm, _)] -> do
+    Nothing -> replyTo m Nothing $ "No Pokémon with name '" <> pkmn <> "' found."
+    Just (pkmnId, pkmnName, pkmnForm, _) -> do
       let fullName = mkFullName pkmnName pkmnForm
       suggestedNatures <- getSuggestedNatures pkmnId
       liftIO $ T.putStrLn "hi2"
@@ -242,19 +242,18 @@ respondNature m = withContext ("respondNature (`" <> messageContent m <> "`)") $
                   <> ":"
                   <> case penny sn of
                     Nothing -> ""
-                    Just n -> "\nPenny's sheet (mostly Pikalytics): " <> n
+                    Just n -> "\n- Penny's sheet (mostly Pikalytics): " <> n
                   <> case jemmaSwSh sn of
                     Nothing -> ""
-                    Just n -> "\nJemma's SwSh sheet (Smogon): " <> n
+                    Just n -> "\n- Jemma's SwSh sheet (Smogon): " <> n
                   <> case jemmaBDSP sn of
                     Nothing -> ""
-                    Just n -> "\nJemma's BDSP sheet (Smogon): " <> n
+                    Just n -> "\n- Jemma's BDSP sheet (Smogon): " <> n
                   <> case jemmaG7 sn of
                     Nothing -> ""
-                    Just n -> "\nJemma's G7 sheet (Smogon): " <> n
+                    Just n -> "\n- Jemma's G7 sheet (Smogon): " <> n
                   <> "\n(Penny's sheet is at https://tinyurl.com/tgkss; Jemma's sheets have been lost to time.)"
           replyTo m Nothing text
-    _ -> replyTo m Nothing "Found multiple matches: this should not happen, please let Penny know"
 
 respondEM :: Message -> App DiscordHandler ()
 respondEM m = withContext ("respondEM (`" <> messageContent m <> "`)") $ do
@@ -281,7 +280,7 @@ respondEM m = withContext ("respondEM (`" <> messageContent m <> "`)") $ do
       -- Try to fetch the Pokemon first. If it can't be found, choose some random moves
       pkmnDetails <- getPokemonIdsAndDetails pkmn
       case pkmnDetails of
-        [] -> do
+        Nothing -> do
           moveDescs <- randomMoves
           let messageText = "I don't think " <> pkmn <> " is a Pokemon, but if it was, it would have the egg moves: " <> T.intercalate ", " (map fst moveDescs) <> "!"
           let embed =
@@ -301,7 +300,7 @@ respondEM m = withContext ("respondEM (`" <> messageContent m <> "`)") $ do
                   }
               )
         -- One exact match found. Calculate egg moves
-        [(id', name, form, _)] -> do
+        Just (id', name, form, _) -> do
           let fullName = mkFullName name form
           -- Check if the message is in a DM
           channel <- lift $ restCall $ DR.GetChannel (messageChannelId m)
@@ -387,7 +386,6 @@ respondEM m = withContext ("respondEM (`" <> messageContent m <> "`)") $ do
                             DR.messageDetailedEmbeds = Just [emEmbedShort]
                           }
                       )
-        _ -> replyTo m Nothing "Found multiple matches: this should not happen, please let Penny know"
 
 respondHA :: Message -> App DiscordHandler ()
 respondHA m = withContext ("respondHA (`" <> messageContent m <> "`)") $ do
@@ -412,7 +410,7 @@ respondHA m = withContext ("respondHA (`" <> messageContent m <> "`)") $ do
   pkmnDetails <- getPokemonIdsAndDetails pkmn
   case pkmnDetails of
     -- Not a Pokemon
-    [] -> do
+    Nothing -> do
       (ha', desc') <- randomAbility
       atomically $ print ha'
       restCall_ $
@@ -426,7 +424,7 @@ respondHA m = withContext ("respondHA (`" <> messageContent m <> "`)") $ do
               }
           )
     -- One species
-    [(pkmnId, name, form, _)] -> do
+    Just (pkmnId, name, form, _) -> do
       let fullName = mkFullName name form
       let piplupDisclaimer =
             if name `elem` ["Piplup", "Prinplup", "Empoleon"]
@@ -448,7 +446,6 @@ respondHA m = withContext ("respondHA (`" <> messageContent m <> "`)") $ do
                     DR.messageDetailedEmbeds = (: []) <$> makeEmbed (ha', desc')
                   }
               )
-    _ -> replyTo m Nothing "Found multiple matches: this should not happen, please let Penny know"
 
 respondLegality :: Message -> App DiscordHandler ()
 respondLegality m = withContext ("respondLegality (`" <> messageContent m <> "`)") $ do
@@ -457,8 +454,8 @@ respondLegality m = withContext ("respondLegality (`" <> messageContent m <> "`)
   -- Try to fetch the Pokemon first.
   pkmnDetails <- getPokemonIdsAndDetails pkmn
   case pkmnDetails of
-    [] -> replyTo m Nothing $ "No Pokémon with name '" <> pkmn <> "' found."
-    [(pkmnId, pkmnName, pkmnForm, _)] -> do
+    Nothing -> replyTo m Nothing $ "No Pokémon with name '" <> pkmn <> "' found."
+    Just (pkmnId, pkmnName, pkmnForm, _) -> do
       unbreedable <- isPokemonUnbreedable pkmnId
       let showLegality :: GenLegality -> Text
           showLegality (GenLegality b d a s sp) =
@@ -497,7 +494,6 @@ respondLegality m = withContext ("respondLegality (`" <> messageContent m <> "`)
                     (M.assocs legalities)
                 )
       replyTo m Nothing message
-    _ -> replyTo m Nothing "Found multiple matches: this should not happen, please let Penny know"
 
 respondPotluckVotes :: Message -> App DiscordHandler ()
 respondPotluckVotes m = withContext "respondPotluckVotes" $ do
