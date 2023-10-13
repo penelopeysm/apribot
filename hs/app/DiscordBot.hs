@@ -169,7 +169,6 @@ notifyLoop = withContext "notifyLoop" $ do
                   when (T.toLower (postSubreddit post) == "pokemontrades") $
                     addNotifiedPost
                       (postId post)
-                      (messageChannelId msg)
                       (messageId msg)
   -- Delete the post (if it's not supposed to be there)
   let unnotifyPost :: ID Post -> App DiscordHandler ()

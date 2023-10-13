@@ -63,7 +63,7 @@ import Data.Text.Encoding (decodeUtf8, encodeUtf8)
 import Data.Time.Clock (UTCTime (..))
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.SqlQQ
-import Discord.Types (ChannelId, DiscordId (..), MessageId, unId, unSnowflake)
+import Discord.Types (DiscordId (..), MessageId, unId, unSnowflake)
 import GHC.Generics (Generic)
 import Reddit
 import Reddit.Auth (Token (..), parseScopes, showScopes)
@@ -207,14 +207,13 @@ getNumVotes = withAppPsqlConn $ \conn -> do
   fromOnly . head
     <$> query_ conn "SELECT COUNT(*) FROM votes;"
 
-addNotifiedPost :: (MonadIO m) => ID Post -> ChannelId -> MessageId -> App m ()
-addNotifiedPost postId channelId messageId = withAppPsqlConn $ \conn -> do
+addNotifiedPost :: (MonadIO m) => ID Post -> MessageId -> App m ()
+addNotifiedPost postId messageId = withAppPsqlConn $ \conn -> do
   void $
     execute
       conn
-      "INSERT INTO discord (post_id, channel_id, message_id) VALUES (?,?,?)"
+      "INSERT INTO discord (post_id, message_id) VALUES (?,?)"
       ( unPostID postId,
-        T.pack . show . unSnowflake . unId $ channelId,
         T.pack . show . unSnowflake . unId $ messageId
       )
 
