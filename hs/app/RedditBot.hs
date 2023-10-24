@@ -7,43 +7,56 @@ import Database
 import DiscordBot (notifyDiscord)
 import Reddit
 import System.Process (readProcess)
-import Text.Printf (printf)
 import Trans
 
 -- | Determine whether a post is a hit. This uses an external Python script and
 -- a pickled (technically joblib'd) scikit-learn classifier, namely, a stacked
 -- ensemble of logistic regression and XGBoost sub-classifiers.
-isHit :: Post -> App IO Bool
+isHit :: Post -> App IO HitStatus
 isHit post = do
   classifierPath <- asks cfgClassifierPath
   result <- liftIO $ T.pack <$> readProcess classifierPath [] (T.unpack $ postTitle post <> " " <> postBody post)
   case T.strip result of
-    "True" -> pure True
-    "False" -> pure False
+    "-1" -> pure DefinitelyNegative
+    "0" -> pure Negative
+    "1" -> pure Positive
     _ -> do
       atomically $ T.putStrLn ("Invalid result from classifier: <" <> result <> ">")
-      pure False
+      pure Negative
 
 -- | Process newly seen posts.
-process :: Post -> RedditT (App IO) ()
+process :: Post -> App IO ()
 process post = do
   case T.toLower (postSubreddit post) of
     "pokemontrades" -> do
-      hit <- lift $ isHit post
-      lift $
-        if hit
-          then do
-            atomically $ printf "PTR Hit: %s,%s,%s\n" (unPostID (postId post)) (postTitle post) (postUrl post)
-            addToDb post True
-            notifyDiscord (NotifyPost post)
-          else do
-            atomically $ printf "PTR Non-hit: %s,%s,%s\n" (unPostID (postId post)) (postTitle post) (postUrl post)
-            addToDb post False
+      hit <- isHit post
+      let outputStr = case hit of
+            DefinitelyNegative -> "Definitely non-hit"
+            Negative -> "Non-hit"
+            Positive -> "Hit"
+      addToDb post hit
+      atomically $
+        T.putStrLn $
+          T.intercalate
+            " "
+            [ "PTR:",
+              outputStr,
+              unPostID (postId post),
+              postTitle post,
+              postUrl post
+            ]
+      when (hit == Positive) $ notifyDiscord (NotifyPost post)
     "bankballexchange" -> do
-      lift $
-        atomically $
-          printf "BBE: %s,%s,%s\n" (unPostID (postId post)) (postTitle post) (postUrl post)
-      lift $ notifyDiscord (NotifyPost post)
+      atomically $
+        T.putStrLn $
+          T.intercalate
+            " "
+            [ "BBE:",
+              unPostID (postId post),
+              postTitle post,
+              postUrl post
+            ]
+      notifyDiscord (NotifyPost post)
     _ -> pure ()
 
 -- | Fetch posts from pokemontrades and BankBallExchange.
@@ -67,4 +80,4 @@ redditBot = do
           { streamsDelay = cfgRedditStreamDelay cfg,
             streamsStorageSize = 400
           }
-  runRedditT redditEnv $ stream' settings process (runAppWith cfg) fetchPosts
+  runRedditT redditEnv $ stream' settings (lift . process) (runAppWith cfg) fetchPosts

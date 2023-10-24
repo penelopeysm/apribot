@@ -33,6 +33,7 @@
 module Database
   ( addToDb,
     PokemonDetails (..),
+    HitStatus (..),
     getAllNames,
     getLatestHits,
     getLatestNonHits,
@@ -69,15 +70,16 @@ import Reddit
 import Reddit.Auth (Token (..), parseScopes, showScopes)
 import Trans
 
--- | Add a post to the `posts` table. The Bool parameter indicates whether it
--- was a hit or not.
-addToDb :: (MonadIO m) => Post -> Bool -> App m ()
+data HitStatus = DefinitelyNegative | Negative | Positive deriving (Eq, Show)
+
+-- | Add a post to the `posts` table.
+addToDb :: (MonadIO m) => Post -> HitStatus -> App m ()
 addToDb post hit = withAppPsqlConn $ \conn ->
   void $
     execute
       conn
-      [sql|INSERT INTO posts (id, url, title, body, submitter, utc_time, flair, hit)
-       VALUES (?,?,?,?,?,?,?,?)
+      [sql|INSERT INTO posts (id, url, title, body, submitter, utc_time, flair, hit, needs_review)
+       VALUES (?,?,?,?,?,?,?,?,?)
        ON CONFLICT (id) DO NOTHING;|]
       ( unPostID (postId post),
         postUrl post,
@@ -86,7 +88,8 @@ addToDb post hit = withAppPsqlConn $ \conn ->
         postAuthor post,
         postCreatedTime post,
         postFlairText post,
-        hit
+        hit == Positive,
+        hit /= DefinitelyNegative
       )
 
 getLatestHits :: (MonadIO m) => Int -> App m [(Text, Text, Text, Text, UTCTime, Maybe Text)]
@@ -187,6 +190,7 @@ getNextUnlabelledPost = withAppPsqlConn $ \conn -> do
       [sql|SELECT id, url, title, body, submitter, utc_time, flair
            FROM posts
            WHERE id NOT IN (SELECT post_id FROM votes)
+                 AND needs_review
            ORDER BY RANDOM()
            LIMIT 1;|]
   case unlabelled of

@@ -9,10 +9,12 @@ from sklearn.pipeline import Pipeline
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import StackingClassifier
 from xgboost import XGBClassifier
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, cross_validate
 from sklearn.metrics import f1_score
 import joblib
+
 from pathlib import Path
+
 from utils import cleanup
 
 # Columns in this dataframe:
@@ -29,41 +31,40 @@ from utils import cleanup
 df = pd.read_parquet('posts.parquet')
 print(f'Loaded {len(df)} posts.')
 
-X = np.array([cleanup(t) for t in (df['title'] + ' ' + df['body']).to_list()])
-y = df['vote'].to_numpy()
+df_voted_processed = (df.assign(title=df.title.apply(cleanup))
+                      .assign(body=df.body.apply(cleanup))
+                      .assign(post=lambda df: df.title + ' ' + df.body)
+                      .loc[df['vote'].notnull(), ['id', 'title', 'body', 'post', 'vote']])
+
+X = df_voted_processed['post'].to_numpy()
+y = df_voted_processed['vote'].to_numpy().astype(int)
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=468)
 
-# Define model
-# TODO: Why does this give different results compared to the version in the
-# notebook (where the featuriser is included in the stacked classifier)?
-# Anyway, this outperforms the notebook version in terms of CV F1 score, so...
-pipeline = Pipeline([
-    ('vectorise', CountVectorizer(ngram_range=(1, 2), max_features=5000)),
-    ('model', StackingClassifier(estimators=[
-        ('xgb', XGBClassifier(max_depth=7, n_estimators=100,
-                              objective='binary:logistic')),
-        ('lr', LogisticRegression(max_iter=5000)),
-    ], final_estimator=LogisticRegression(max_iter=5000)))
-])
+print(f"1's in training set : {np.count_nonzero(y_train)} out of {len(y_train)} ({np.count_nonzero(y_train) / len(y_train):.2%})") # type: ignore
+print(f"1's in test set     : {np.count_nonzero(y_test)} out of {len(y_test)} ({np.count_nonzero(y_test) / len(y_test):.2%})") # type: ignore
 
-# Version which reproduces the notebook CV results perfectly
-# pipeline = StackingClassifier(estimators=[
-#         ('xgb', Pipeline([
-#             ('vectorise', CountVectorizer(ngram_range=(1, 2), max_features=5000)),
-#             ('clf', XGBClassifier(max_depth=7, n_estimators=100,
-#                               objective='binary:logistic'))])),
-#         ('lr', Pipeline([
-#             ('vectorise', CountVectorizer(ngram_range=(1, 2), max_features=5000)),
-#             ('clf', LogisticRegression(max_iter=5000))])),
-#     ], final_estimator=LogisticRegression(max_iter=5000)
-# )
+# Define model. The hyperparameters were optimised in the notebook.
+pipeline = StackingClassifier(
+    estimators=[
+        ('xg', Pipeline([
+            ('vec', CountVectorizer(ngram_range=(1, 2), max_features=10000)),
+            ('clf', XGBClassifier(max_depth=9, n_estimators=100, objective='binary:logistic')),
+        ])),
+        ('lr', Pipeline([
+            ('vec', CountVectorizer(ngram_range=(1, 2), max_features=10000)),
+            ('clf', LogisticRegression(max_iter=5000)),
+        ]))
+    ],
+    final_estimator=LogisticRegression(max_iter=5000)
+)
 
-print('Cross-validating...')
-from sklearn.model_selection import cross_val_score
-scores = cross_val_score(pipeline, X_train, y_train, cv=5, scoring='f1')
-print(f'CV F1 score: {scores.mean():.4%}')
+print('Performing cross-validation...')
 
-print('Training...', end=' ')
+cv = cross_validate(pipeline, X_train, y_train, cv=5, scoring='f1')
+print(f'CV F1 score: {np.mean(cv["test_score"]):.4%}')
+
+print('Training...')
+
 pipeline.fit(X_train, y_train)
 y_pred = pipeline.predict(X_test)
 print(f'Test F1 score: {f1_score(y_pred=y_pred, y_true=y_test):.4%}')

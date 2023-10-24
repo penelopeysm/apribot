@@ -227,7 +227,7 @@ respondNature m = withContext ("respondNature (`" <> messageContent m <> "`)") $
   -- Try to fetch the Pokemon first.
   pkmnDetails <- getPokemonIdsAndDetails pkmn
   case pkmnDetails of
-    Nothing -> replyTo m Nothing $ "No Pokémon with name '" <> pkmn <> "' found.\n(If you're having trouble finding a Pokémon, try looking it up at https://apribot.fly.dev/names.)"
+    Nothing -> replyTo m Nothing $ "No Pokémon with name '" <> pkmn <> "' found.\n(If you're having trouble finding a Pokémon, try looking it up at https://apribot.fly.dev/names)"
     Just (pkmnId, pkmnName, pkmnForm, _) -> do
       let fullName = mkFullName pkmnName pkmnForm
       suggestedNatures <- getSuggestedNatures pkmnId
@@ -281,7 +281,7 @@ respondEM m = withContext ("respondEM (`" <> messageContent m <> "`)") $ do
       case pkmnDetails of
         Nothing -> do
           moveDescs <- randomMoves
-          let messageText = "I don't think " <> pkmn <> " is a Pokemon, but if it was, it would have the egg moves: " <> T.intercalate ", " (map fst moveDescs) <> "!\n(If you were trying to find a real Pokémon, try looking it up at https://apribot.fly.dev/names.)"
+          let messageText = "I don't think " <> pkmn <> " is a Pokemon, but if it was, it would have the egg moves: " <> T.intercalate ", " (map fst moveDescs) <> "!\n(If you were trying to find a real Pokémon, try looking it up at https://apribot.fly.dev/names)"
           let embed =
                 def
                   { createEmbedTitle = "Descriptions",
@@ -417,7 +417,7 @@ respondHA m = withContext ("respondHA (`" <> messageContent m <> "`)") $ do
           (messageChannelId m)
           ( def
               { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
-                DR.messageDetailedContent = "I don't think " <> pkmn <> " is a Pokemon, but if it was, it would have the hidden ability " <> ha' <> "!\n(If you were trying to find a real Pokémon, try looking it up at https://apribot.fly.dev/names.)",
+                DR.messageDetailedContent = "I don't think " <> pkmn <> " is a Pokemon, but if it was, it would have the hidden ability " <> ha' <> "!\n(If you were trying to find a real Pokémon, try looking it up at https://apribot.fly.dev/names)",
                 DR.messageDetailedAllowedMentions = Nothing,
                 DR.messageDetailedEmbeds = (: []) <$> makeEmbed (ha', desc')
               }
@@ -453,7 +453,7 @@ respondLegality m = withContext ("respondLegality (`" <> messageContent m <> "`)
   -- Try to fetch the Pokemon first.
   pkmnDetails <- getPokemonIdsAndDetails pkmn
   case pkmnDetails of
-    Nothing -> replyTo m Nothing $ "No Pokémon with name '" <> pkmn <> "' found.\n(If you're having trouble finding a Pokémon, try looking it up at https://apribot.fly.dev/names.)"
+    Nothing -> replyTo m Nothing $ "No Pokémon with name '" <> pkmn <> "' found.\n(If you're having trouble finding a Pokémon, try looking it up at https://apribot.fly.dev/names)"
     Just (pkmnId, pkmnName, pkmnForm, _) -> do
       unbreedable <- isPokemonUnbreedable pkmnId
       let showLegality :: GenLegality -> Text
