@@ -1,6 +1,17 @@
 <script lang="ts">
     import { showDate } from "../utils";
+    import { onMount } from "svelte";
     export let data;
+
+    let disabled = true;
+    let trustedUsers = ["JBSouls", "againpedro", "is_a_togekiss"];
+    let timer = data.username !== null && trustedUsers.includes(data.username) ? 500 : 1500;
+
+    onMount(() => {
+        setTimeout(() => {
+            disabled = false;
+        }, timer);
+    });
 </script>
 
 <svelte:head>
@@ -64,9 +75,9 @@
             <input type="hidden" name="id" value={data.nextUnlabelled.id} />
             <input type="hidden" name="username" value={data.username} />
             <div id="button-container">
-                <button type="submit" name="vote" value="1">✅ Yes</button>
-                <button type="submit" name="vote" value="0">❌ No</button>
-                <button type="submit" name="vote" value="2">⏭️ Skip</button>
+                <button type="submit" name="vote" value="1" disabled={disabled}>✅ Yes</button>
+                <button type="submit" name="vote" value="0" disabled={disabled}>❌ No</button>
+                <button type="submit" name="vote" value="2" disabled={disabled}>⏭️ Skip</button>
             </div>
         </form>
     </div>
