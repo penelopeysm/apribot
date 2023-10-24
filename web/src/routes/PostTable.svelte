@@ -1,14 +1,6 @@
 <script lang="ts">
+    import { showDate } from "./utils";
     export let posts: any[];
-
-    function pad(n: number) {
-        return n < 10 ? `0${n}` : n;
-    }
-
-    function showDate(d: Date) {
-        // getMonth returns 0 for January (?!)
-        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-    }
 </script>
 
 {#if posts.length > 0}
@@ -25,10 +17,11 @@
         <tbody>
             {#each posts as post}
                 <tr
-                    ><td><code>{post.id}</code></td><td>{showDate(post.time)}</td><td
-                        >/u/{post.submitter}</td
-                    ><td>{post.flair === null ? "" : post.flair}</td><td
-                        class="post-title"
+                    ><td><code>{post.id}</code></td><td
+                        >{showDate(post.time)}</td
+                    ><td>/u/{post.submitter}</td><td
+                        >{post.flair === null ? "" : post.flair}</td
+                    ><td class="post-title"
                         ><a href={post.url}>{post.title}</a></td
                     ></tr
                 >

@@ -22,56 +22,6 @@ import Trans
 import Utils
 import qualified Web.Scotty.Trans as ST
 
--- contributingLoggedInHtml' :: Text -> App IO (Html ())
--- contributingLoggedInHtml' username = do
---   pure $ doctypehtml_ $ do
---     body_ $ main_ $ do
---       h1_ "Contribute"
---       p_ $ b_ $ do
---         "You are now logged in as: /u/"
---         toHtml username
---       p_ $ do
---         "Right now, out of a total of "
---         toHtml (show totalPosts)
---         " posts, "
---         toHtml (show labelledPosts)
---         " have been labelled. "
---         if labelledPostsByUser > 0
---           then do
---             toHtml $ show labelledPostsByUser
---             " of these were by you. Thank you so much! <3"
---           else ""
---         case nextPost of
---           -- This is very optimistic...
---           Nothing -> do
---             hr_ []
---             p_ "There are no more unlabelled posts. Please check back again tomorrow!"
---           Just (postId, postUrl, postTitle, postBody, postSubmitter, postTime, postFlair) -> do
---             div_ [class_ "form-container"] $ do
---               form_ [class_ "aprimon-question", action_ "/contribute", method_ "post"] $ do
---                 span_ $ b_ "Is the post below offering, or looking for, non-shiny breedable Aprimon?"
---                 input_ [type_ "hidden", name_ "id", value_ postId]
---                 input_ [type_ "hidden", name_ "username", value_ username]
---                 div_ [id_ "button-container"] $ do
---                   button_ [type_ "submit", name_ "vote", value_ "1", disabled_ ""] "✅ Yes"
---                   button_ [type_ "submit", name_ "vote", value_ "0", disabled_ ""] "❌ No"
---                   button_ [type_ "submit", name_ "vote", value_ "2", disabled_ ""] "⏭️ Skip"
---             div_ $ do
---               span_ [class_ "title"] $ toHtmlRaw $ sanitizeBalance postTitle
---               span_ [class_ "boxed-flair"] $ toHtml $ fromMaybe "" postFlair
---             ul_ $ do
---               li_ $ toHtml (printf "Submitted by /u/%s at %s UTC" postSubmitter (show postTime) :: String)
---               li_ $ do
---                 a_ [href_ postUrl] "Link to original Reddit post"
---             if T.null (T.strip postBody)
---               then p_ "<empty post body>"
---               else
---                 div_ [class_ "post-body"] $
---                   toHtmlRaw $
---                     commonmarkToHtml [optSmart] [extTable, extStrikethrough] postBody
-
--- * The web app
-
 newtype RedditLoggedInResponse = RedditLoggedInResponse
   {sessionId :: Text}
   deriving (Show, Generic, ToJSON, FromJSON)
@@ -81,17 +31,18 @@ data TotalAssignedResponse = TotalAssignedResponse
   {rows :: Int, hits :: Int}
   deriving (Generic, Show, ToJSON)
 
-data MainPagePostDetails = MainPagePostDetails
+data RedditPostDetails = RedditPostDetails
   { post_id :: Text,
     post_url :: Text,
     post_title :: Text,
+    post_body :: Text,
     post_submitter :: Text,
     post_time :: UTCTime,
     post_flair :: Maybe Text
   }
   deriving (Generic, Show)
 
-instance ToJSON MainPagePostDetails where
+instance ToJSON RedditPostDetails where
   toJSON = genericToJSON $ defaultOptions {fieldLabelModifier = drop 5}
 
 -- | /api/ml_stats
@@ -134,13 +85,13 @@ web = do
       nPosts :: Int <- ST.param "limit" `ST.rescue` const (pure 50)
       posts <- lift $ getLatestHits nPosts
       -- TODO: Ugly. The conversion should be done in getLatestHits
-      ST.json $ map (\(a, b, c, d, e, f) -> MainPagePostDetails a b c d e f) posts
+      ST.json $ map (\(a, b, c, d, e, f) -> RedditPostDetails a b c "" d e f) posts
 
     ST.get "/api/nonhits" $ do
       nPosts :: Int <- ST.param "limit" `ST.rescue` const (pure 50)
       posts <- lift $ getLatestNonHits nPosts
       -- TODO: Ugly. The conversion should be done in getLatestHits
-      ST.json $ map (\(a, b, c, d, e, f) -> MainPagePostDetails a b c d e f) posts
+      ST.json $ map (\(a, b, c, d, e, f) -> RedditPostDetails a b c "" d e f) posts
 
     ST.get "/api/ml_stats" $ do
       totalPosts <- lift getTotalRows
@@ -265,3 +216,14 @@ web = do
       n :: Int <- ST.param "limit" `ST.rescue` const (pure 100)
       userStats <- lift $ getUserStats n username
       ST.json userStats
+
+    ST.get "/api/next_unlabelled" $ do
+      nextPost <- lift getNextUnlabelledPost
+      case nextPost of
+        Nothing -> ST.json $ BackendError "no_posts_needing_review"
+        Just (a, b, c, d, e, f, g) ->
+          ST.json $
+            object
+              [ "error" .= ("" :: Text),
+                "post" .= RedditPostDetails a b c d e f g
+              ]
