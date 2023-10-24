@@ -3,20 +3,41 @@
     import { onMount } from "svelte";
     export let data;
 
+    let buttonYes: HTMLButtonElement;
+    let buttonNo: HTMLButtonElement;
+    let buttonSkip: HTMLButtonElement;
+
     let disabled = true;
     let trustedUsers = ["JBSouls", "againpedro", "is_a_togekiss"];
-    let timer = data.username !== null && trustedUsers.includes(data.username) ? 500 : 1500;
+    let timer =
+        data.username !== null && trustedUsers.includes(data.username)
+            ? 500
+            : 1500;
 
     onMount(() => {
         setTimeout(() => {
             disabled = false;
         }, timer);
     });
+
+    function submitFormWithKeyboard(event: KeyboardEvent) {
+        if (disabled) return;
+
+        if (event.key === "y") {
+            buttonYes.click();
+        } else if (event.key === "n") {
+            buttonNo.click();
+        } else if (event.key === "s") {
+            buttonSkip.click();
+        }
+    }
 </script>
 
 <svelte:head>
     <title>ApriBot :: Contribute</title>
 </svelte:head>
+
+<svelte:window on:keydown={submitFormWithKeyboard} />
 
 <h1>Contribute</h1>
 
@@ -74,10 +95,29 @@
             >
             <input type="hidden" name="id" value={data.nextUnlabelled.id} />
             <div id="button-container">
-                <button type="submit" name="vote" value="1" disabled={disabled}>✅ Yes</button>
-                <button type="submit" name="vote" value="0" disabled={disabled}>❌ No</button>
-                <button type="submit" name="vote" value="2" disabled={disabled}>⏭️ Skip</button>
+                <button
+                    type="submit"
+                    name="vote"
+                    value="1"
+                    {disabled}
+                    bind:this={buttonYes}>✅ <span class="underline">Y</span>es</button
+                >
+                <button
+                    type="submit"
+                    name="vote"
+                    value="0"
+                    {disabled}
+                    bind:this={buttonNo}>❌ <span class="underline">N</span>o</button
+                >
+                <button
+                    type="submit"
+                    name="vote"
+                    value="2"
+                    {disabled}
+                    bind:this={buttonSkip}>⏭️ <span class="underline">S</span>kip</button
+                >
             </div>
+            <span><i>New:</i> You can now press y, n, or s on your keyboard to submit the form!</span>
         </form>
     </div>
 
@@ -114,5 +154,9 @@
 <style>
     .strong {
         font-weight: bold;
+    }
+    .underline {
+        text-decoration: underline;
+        text-decoration-thickness: 1.7px;
     }
 </style>
