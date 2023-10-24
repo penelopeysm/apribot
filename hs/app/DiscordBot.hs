@@ -26,6 +26,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.Text.IO as T
+import Data.Time.Clock (diffUTCTime, getCurrentTime)
 import Data.Time.Clock.System (getSystemTime, systemSeconds)
 import Data.Word (Word64)
 import Database (addNotifiedPost, checkNotifiedStatus)
@@ -145,12 +146,13 @@ notifyLoop = withContext "notifyLoop" $ do
   let notifyPost :: Post -> App DiscordHandler ()
       notifyPost post = when (isNothing $ postDeleted post) $ do
         alreadyNotified <- checkNotifiedStatus (postId post)
+        now <- liftIO getCurrentTime
         when (isNothing alreadyNotified) $ do
           -- Determine which channel to post to
           let maybeChannelId = case T.toLower (postSubreddit post) of
                 "pokemontrades" -> case postFlairText post of
                   Just flair ->
-                    if "Closed" `T.isInfixOf` flair
+                    if "Closed" `T.isInfixOf` flair || diffUTCTime now (postCreatedTime post) > 60 * 60 * 24 * 2
                       then Nothing
                       else Just (cfgPtrChannelId cfg)
                   Nothing -> Nothing
@@ -799,8 +801,7 @@ restCall_ :: (Request (r a), FromJSON a) => r a -> App (ReaderT DiscordHandle IO
 restCall_ req = do
   resp <- lift $ restCall req
   case resp of
-    Left e -> do
-      tellError e
+    Left e -> tellError e
     Right _ -> pure ()
 
 replyTo :: Message -> Maybe [UserId] -> Text -> App DiscordHandler ()

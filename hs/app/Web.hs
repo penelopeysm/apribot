@@ -7,7 +7,7 @@ module Web (web) where
 import Control.Exception (SomeException, try)
 import Data.Aeson
 import qualified Data.Set as Set
-import Data.Text (Text, pack)
+import Data.Text (Text)
 import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy as TL
 import Data.Time.Clock (UTCTime (..), getCurrentTime)
