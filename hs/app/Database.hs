@@ -46,6 +46,8 @@ module Database
     getUserStats,
     getNextUnlabelledPost,
     addVote,
+    changeVote,
+    deleteVote,
     getNumVotes,
     addNotifiedPost,
     checkNotifiedStatus,
@@ -211,6 +213,22 @@ addVote postId voter vote = withAppPsqlConn $ \conn -> do
       conn
       "INSERT INTO votes (post_id, username, vote) VALUES (?,?,?)"
       (postId, voter, vote)
+
+changeVote :: MonadIO m => Text -> Text -> App m ()
+changeVote postId voter = withAppPsqlConn $ \conn -> do
+  void $
+    execute
+      conn
+      "UPDATE votes SET vote = NOT vote WHERE post_id = ? AND username = ?"
+      (postId, voter)
+
+deleteVote :: MonadIO m => Text -> Text -> App m ()
+deleteVote postId voter = withAppPsqlConn $ \conn -> do
+  void $
+    execute
+      conn
+      "DELETE FROM votes WHERE post_id = ? AND username = ?"
+      (postId, voter)
 
 getNumVotes :: (MonadIO m) => App m Int
 getNumVotes = withAppPsqlConn $ \conn -> do

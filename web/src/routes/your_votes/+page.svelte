@@ -33,8 +33,9 @@
         you voted on (most recent on top). Thank you so much for your help!
     </p>
     <p>
-        If you find you need to change or delete any of your votes, please get
-        in touch with me via Discord (<code>@is_a_togekiss</code>) or
+        This page allows you to change or delete your most recent votes. If you
+        want to change or delete any votes not listed here, please get in touch
+        with me via Discord (<code>@is_a_togekiss</code>) or
         <a href="https://reddit.com/u/is_a_togekiss">Reddit</a>.
     </p>
 
@@ -45,16 +46,35 @@
                 <th>Post title</th>
                 <th>Submitter</th>
                 <th>Your vote</th>
+                <th colspan="2">Actions</th>
             </tr>
         </thead>
         <tbody>
             {#each data.votes as v}
                 <tr>
-                    <td>{v.postId}</td>
+                    <td><code>{v.postId}</code></td>
                     <td><a href={v.postUrl}>{v.postTitle}</a></td>
                     <td>/u/{v.postSubmitter}</td>
                     <td>{v.vote ? "Yes" : "No"}</td>
+                    <td
+                        ><form action="/your_votes?/change" method="POST">
+                            <input type="hidden" name="id" value={v.postId} />
+                            <button type="submit" class="small">Change</button>
+                        </form></td
+                    ><td>
+                        <form action="/your_votes?/delete" method="POST">
+                            <input type="hidden" name="id" value={v.postId} />
+                            <button type="submit" class="small">Delete</button>
+                        </form></td
+                    >
                 </tr>{/each}
         </tbody>
     </table>
 {/if}
+
+<style>
+    button.small {
+        font-size: 90%;
+        padding: 0px;
+    }
+</style>

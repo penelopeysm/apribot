@@ -1,4 +1,5 @@
 import type { Post } from "../types";
+import {getLoginUsername} from "../utils";
 import { redirect } from "@sveltejs/kit";
 import showdown from "showdown";
 import sanitizeHtml from "sanitize-html";
@@ -45,15 +46,18 @@ export async function load({ parent, fetch }) {
 }
 
 export const actions = {
-    default: async ({ fetch, request }) => {
+    default: async ({ fetch, request, cookies }) => {
         const data = await request.formData();
+
+        // Get username from backend
+        const username = await getLoginUsername(cookies);
 
         // Send to Haskell backend
         const backendResp = await fetch('http://localhost:8080/api/contribute', {
             method: 'POST',
             body: JSON.stringify({
                 contrib_post_id: data.get('id'),
-                contrib_username: data.get('username'),
+                contrib_username: username,
                 // TODO: ugly. How can we make this correct?
                 contrib_vote: parseInt(data.get('vote') as string),
             }),

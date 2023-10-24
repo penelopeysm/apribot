@@ -75,6 +75,12 @@ data ContributeParam = ContributeParam
   }
   deriving (Generic, Show, ToJSON, FromJSON)
 
+data VoteChangeParam = VoteChangeParam
+  { vote_post_id :: Text,
+    vote_username :: Text
+  }
+  deriving (Generic, Show, ToJSON, FromJSON)
+
 web :: App IO ()
 web = do
   cfg <- ask
@@ -236,3 +242,19 @@ web = do
               [ "error" .= ("" :: Text),
                 "post" .= RedditPostDetails a b c d e f g
               ]
+
+    ST.post "/api/change_vote" $ do
+      maybeVoteChange :: Maybe VoteChangeParam <- decode <$> ST.body
+      case maybeVoteChange of
+        Nothing -> ST.json $ BackendError "invalid_change_vote"
+        Just (VoteChangeParam postId voter) -> do
+          lift $ changeVote postId voter
+          ST.json $ object ["success" .= True]
+
+    ST.post "/api/delete_vote" $ do
+      maybeVoteChange :: Maybe VoteChangeParam <- decode <$> ST.body
+      case maybeVoteChange of
+        Nothing -> ST.json $ BackendError "invalid_delete_vote"
+        Just (VoteChangeParam postId voter) -> do
+          lift $ deleteVote postId voter
+          ST.json $ object ["success" .= True]

@@ -73,7 +73,6 @@
                 Aprimon?</span
             >
             <input type="hidden" name="id" value={data.nextUnlabelled.id} />
-            <input type="hidden" name="username" value={data.username} />
             <div id="button-container">
                 <button type="submit" name="vote" value="1" disabled={disabled}>✅ Yes</button>
                 <button type="submit" name="vote" value="0" disabled={disabled}>❌ No</button>
