@@ -1,9 +1,11 @@
 import type { Post } from "../types";
+import { redirect } from "@sveltejs/kit";
 import showdown from "showdown";
 import sanitizeHtml from "sanitize-html";
 
 function markdown2HtmlSafe(md: string): string {
     const converter = new showdown.Converter();
+    converter.setOption('tables', true);
     const html = sanitizeHtml(converter.makeHtml(md));
     return html.replace(/&amp;#x200B;/g, '');
 }
@@ -36,7 +38,29 @@ export async function load({ parent, fetch }) {
     return {
         totalSeen: mlStats.seen,
         totalLabelled: mlStats.labelled,
+        totalNeedNotLabel: mlStats.need_not_label,
         labelledByUser: labelledByUser,
         nextUnlabelled: next,
+    }
+}
+
+export const actions = {
+    default: async ({ fetch, request }) => {
+        const data = await request.formData();
+
+        // Send to Haskell backend
+        const backendResp = await fetch('http://localhost:8080/api/contribute', {
+            method: 'POST',
+            body: JSON.stringify({
+                contrib_post_id: data.get('id'),
+                contrib_username: data.get('username'),
+                // TODO: ugly. How can we make this correct?
+                contrib_vote: parseInt(data.get('vote') as string),
+            }),
+        }).then((r) => r.json());
+
+        if (backendResp.success) {
+            throw redirect(301, '/contribute');
+        }
     }
 }

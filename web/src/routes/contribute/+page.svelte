@@ -21,9 +21,13 @@
     <ul>
         <li>ApriBot has seen a total of {data.totalSeen} posts.</li>
         <li>
-            {data.totalLabelled} of these have been labelled by some amazing people!
+            {data.totalNeedNotLabel} of these were marked as not needing manual review
+            (as they are almost certainly not Aprimon-related); and
         </li>
-        <li>14487 of these were used to train ApriBot's current algorithm.</li>
+        <li>
+            {data.totalLabelled} of these have been labelled by some amazing people,
+            of which 14487 were used to train ApriBot's current algorithm.
+        </li>
     </ul>
 
     <p>
@@ -43,8 +47,8 @@
     <p>There are no more unlabelled posts. Please check back again tomorrow!</p>
 {:else}
     <p>
-        Right now, out of {data.totalSeen} posts, {data.totalLabelled} have been
-        labelled.
+        Right now, out of {data.totalSeen - data.totalNeedNotLabel} posts requiring
+        review, {data.totalLabelled} have been labelled.
         {#if data.labelledByUser !== null && data.labelledByUser > 0}
             {data.labelledByUser} of these {data.labelledByUser === 1
                 ? "was"
@@ -52,7 +56,7 @@
         {/if}
     </p>
     <div class="form-container">
-        <form class="aprimon-question" action="/api/contribute" method="post">
+        <form class="aprimon-question" action="/contribute" method="POST">
             <span class="strong"
                 >Is the post below offering, or looking for, non-shiny breedable
                 Aprimon?</span

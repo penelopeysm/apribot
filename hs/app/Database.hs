@@ -42,6 +42,7 @@ module Database
     getTotalMLAssignedRows,
     getTotalMLAssignedHits,
     getTotalNumberLabelled,
+    getTotalNumberNeedNotLabel,
     getUserStats,
     getNextUnlabelledPost,
     addVote,
@@ -138,6 +139,11 @@ getTotalNumberLabelled :: (MonadIO m) => App m Int
 getTotalNumberLabelled = withAppPsqlConn $ \conn -> do
   fromOnly . head
     <$> query_ conn "SELECT COUNT(DISTINCT post_id) FROM votes;"
+
+getTotalNumberNeedNotLabel :: (MonadIO m) => App m Int
+getTotalNumberNeedNotLabel = withAppPsqlConn $ \conn -> do
+  fromOnly . head
+    <$> query_ conn "SELECT COUNT(*) FROM posts WHERE NOT needs_review;"
 
 data VoteResponse = VoteResponse
   { vote_postId :: Text,

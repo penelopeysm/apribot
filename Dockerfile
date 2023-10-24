@@ -9,7 +9,9 @@ COPY web/tsconfig.json .
 COPY web/vite.config.ts .
 COPY web/src ./src
 COPY web/static ./static
-RUN npm install && npm run build
+RUN npm install \
+    && npm run build \
+    && npm prune --production
 
 FROM penelopeysm/apribot:latest
 
@@ -28,6 +30,7 @@ RUN git config --global --add safe.directory '*' \
 # other dependencies. If we have external dependencies then we also need
 # node_modules, see https://kit.svelte.dev/docs/adapter-node
 WORKDIR /web
+COPY --from=server-builder ./web/node_modules ./node_modules
 COPY --from=server-builder ./web/build ./build
 COPY --from=server-builder ./web/package.json .
 

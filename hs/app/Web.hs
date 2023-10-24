@@ -7,7 +7,7 @@ module Web (web) where
 import Control.Exception (SomeException, try)
 import Data.Aeson
 import qualified Data.Set as Set
-import Data.Text (Text)
+import Data.Text (Text, pack)
 import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy as TL
 import Data.Time.Clock (UTCTime (..), getCurrentTime)
@@ -47,7 +47,10 @@ instance ToJSON RedditPostDetails where
 
 -- | /api/ml_stats
 data MLStatsResponse = MLStatsResponse
-  {seen :: Int, labelled :: Int}
+  { seen :: Int,
+    labelled :: Int,
+    need_not_label :: Int
+  }
   deriving (Generic, Show, ToJSON)
 
 newtype BackendError = BackendError
@@ -62,6 +65,13 @@ newtype CodeParam = CodeParam
 
 newtype StateParam = StateParam
   { state :: Text
+  }
+  deriving (Generic, Show, ToJSON, FromJSON)
+
+data ContributeParam = ContributeParam
+  { contrib_post_id :: Text,
+    contrib_username :: Text,
+    contrib_vote :: Int
   }
   deriving (Generic, Show, ToJSON, FromJSON)
 
@@ -96,7 +106,8 @@ web = do
     ST.get "/api/ml_stats" $ do
       totalPosts <- lift getTotalRows
       labelledPosts <- lift getTotalNumberLabelled
-      ST.json $ MLStatsResponse totalPosts labelledPosts
+      needNotLabel <- lift getTotalNumberNeedNotLabel
+      ST.json $ MLStatsResponse totalPosts labelledPosts needNotLabel
 
     ST.post "/api/login_username" $ do
       let clientId = cfgRedditFrontendId cfg
@@ -192,13 +203,11 @@ web = do
           ST.json $ object ["success" .= True]
 
     ST.post "/api/contribute" $ do
-      mPostId :: Maybe Text <- (Just <$> ST.param "id") `ST.rescue` const (pure Nothing)
-      mVoter :: Maybe Text <- (Just <$> ST.param "username") `ST.rescue` const (pure Nothing)
-      mVote :: Maybe Int <- (Just <$> ST.param "vote") `ST.rescue` const (pure Nothing)
-      case (mPostId, mVoter, mVote) of
-        (Just postId, Just voter, Just vote) ->
+      maybeContribute :: Maybe ContributeParam <- decode <$> ST.body
+      case maybeContribute of
+        Just (ContributeParam postId voter vote) -> do
           if vote /= 0 && vote /= 1
-            then ST.redirect "/contribute"
+            then ST.json $ BackendError "invalid_vote"
             else do
               lift $ addVote postId voter (vote == 1)
               hit <- lift $ wasHit postId
@@ -208,8 +217,8 @@ web = do
               when (hit && vote == 0) $ lift $ do
                 atomically $ T.putStrLn ("Removing false positive " <> postId)
                 notifyDiscord (UnnotifyPostById (PostID postId))
-              ST.redirect "/contribute"
-        _ -> ST.redirect "/contrib_error"
+              ST.json $ object ["success" .= True]
+        Nothing -> ST.json $ BackendError "invalid_vote"
 
     ST.get "/api/user_stats" $ do
       username :: Text <- ST.param "username"
