@@ -259,14 +259,14 @@
         max-width: 25px;
         /* This value needs to account for the maximum height of the rotated inner div.
            There's no CSS-only way to calculate this, afaik (though you can use JavaScript) */
-        min-height: 120px;
-        height: 120px;
+        min-height: 135px;
+        height: 135px;
     }
 
     .rotated div {
         transform: rotate(-90deg);
         transform-origin: center left;
-        translate: 50% 250%;
+        translate: 50% 65px;  /* Second value should be slightly less than half of the height above */
         height: max-content;
     }
 
