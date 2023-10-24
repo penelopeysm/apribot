@@ -1,3 +1,7 @@
-**/dist-newstyle
-**/*.db
-cabal.project.local
+hs/dist-newstyle
+hs/cabal.project.local
+plots
+hs/python/__pycache__/
+hs/python/venv/
+hs/python/posts.parquet
+.git
