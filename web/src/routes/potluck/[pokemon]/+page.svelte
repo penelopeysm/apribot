@@ -22,6 +22,14 @@
         };
     }
 
+    function countTotalTrades(tableData: TableRow[]) {
+        let n = 0;
+        for (let row of tableData) {
+            n += row.giving.filter(Boolean).length;
+        }
+        return n;
+    }
+
     function setHighlighted(
         usernameRow: string | null,
         usernameCol: string | null
@@ -46,8 +54,8 @@
         });
     }
 
-    const tableData = data.csv.trim().split("\n").map(parseCsvLine);
-    const users = tableData.map((x) => x.username);
+    const tableData: TableRow[] = data.csv.trim().split("\n").map(parseCsvLine);
+    const users: string[] = tableData.map((x) => x.username);
 </script>
 
 <svelte:head>
@@ -58,6 +66,10 @@
 <p>
     You can click on your name to see a list of your trades. (You don't need to
     log in for this!)
+</p>
+
+<p>
+    This potluck round features {tableData.length} participants and {countTotalTrades(tableData)} trades.
 </p>
 
 <table>
@@ -95,7 +107,7 @@
                     }}><div>{user}</div></td
                 >
             {/each}
-            <th>Total sending</th>
+            <th style="width:min-content">Total sending</th>
         </tr>
         {#each tableData as tableRow, i}
             <tr>
@@ -189,6 +201,33 @@
                 >
             </tr>
         {/each}
+        <tr>
+            <td />
+            <th>Ball</th>
+            <th>Username</th>
+            {#each users as user}
+                <td
+                    class="clickable rotated"
+                    class:highlighted={user === highlightedCol}
+                    on:mouseover={() => {
+                        setHighlighted(user, user);
+                    }}
+                    on:mouseout={() => {
+                        setHighlighted(null, null);
+                    }}
+                    on:focus={() => {
+                        setHighlighted(user, user);
+                    }}
+                    on:blur={() => {
+                        setHighlighted(null, null);
+                    }}
+                    on:click={() => {
+                        clickedUser = user;
+                    }}><div>{user}</div></td
+                >
+            {/each}
+                <td></td>
+        </tr>
         <tr>
             <td />
             <th colspan="2">Total receiving</th>
