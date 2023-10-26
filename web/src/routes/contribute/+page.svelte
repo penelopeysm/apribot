@@ -100,24 +100,30 @@
                     name="vote"
                     value="1"
                     {disabled}
-                    bind:this={buttonYes}>✅ <span class="underline">Y</span>es</button
+                    bind:this={buttonYes}
+                    >✅ <span class="underline">Y</span>es</button
                 >
                 <button
                     type="submit"
                     name="vote"
                     value="0"
                     {disabled}
-                    bind:this={buttonNo}>❌ <span class="underline">N</span>o</button
+                    bind:this={buttonNo}
+                    >❌ <span class="underline">N</span>o</button
                 >
                 <button
                     type="submit"
                     name="vote"
                     value="2"
                     {disabled}
-                    bind:this={buttonSkip}>⏭️ <span class="underline">S</span>kip</button
+                    bind:this={buttonSkip}
+                    >⏭️ <span class="underline">S</span>kip</button
                 >
             </div>
-            <span><i>New:</i> You can now press y, n, or s on your keyboard to submit the form!</span>
+            <span
+                ><i>New:</i> You can now press y, n, or s on your keyboard to submit
+                the form!</span
+            >
         </form>
     </div>
 
@@ -155,8 +161,55 @@
     .strong {
         font-weight: bold;
     }
+
     .underline {
         text-decoration: underline;
         text-decoration-thickness: 1.7px;
+    }
+
+    div.form-container {
+        display: flex;
+        justify-content: center;
+        margin: 20px;
+    }
+
+    form.aprimon-question {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 10px;
+        border: 2px solid black;
+        border-radius: 5px;
+        background-color: var(--pink);
+        align-items: center;
+    }
+
+    div#button-container {
+        display: flex;
+        gap: 35px;
+    }
+
+    button {
+        font-family: inherit;
+        font-size: 120%;
+        padding: 0px 10px;
+    }
+
+    span.title {
+        font-size: 120%;
+        font-weight: bold;
+    }
+
+    span.boxed-flair {
+        font-size: 80%;
+        border: 1px solid #000;
+        border-radius: 5px;
+        padding: 1px 5px;
+        margin-left: 10px;
+        vertical-align: text-top;
+    }
+
+    div.post-body {
+        padding: 0px 20px;
     }
 </style>

@@ -1,15 +1,6 @@
 import type { Post } from "../types";
-import {getLoginUsername} from "../utils";
+import { getLoginUsername, unescapeHtmlChars, markdown2HtmlSafe } from "../utils";
 import { redirect } from "@sveltejs/kit";
-import showdown from "showdown";
-import sanitizeHtml from "sanitize-html";
-
-function markdown2HtmlSafe(md: string): string {
-    const converter = new showdown.Converter();
-    converter.setOption('tables', true);
-    const html = sanitizeHtml(converter.makeHtml(md));
-    return html.replace(/&amp;#x200B;/g, '');
-}
 
 export async function load({ parent, fetch }) {
     const nextUnlabelled = await fetch("http://localhost:8080/api/next_unlabelled").then((res) => res.json());
@@ -31,6 +22,7 @@ export async function load({ parent, fetch }) {
             next = null;
         } else {
             next = nextUnlabelled.post as Post;
+            next.title = unescapeHtmlChars(next.title);
             next.body = markdown2HtmlSafe(next.body);
             next.time = new Date(next.time);
         }

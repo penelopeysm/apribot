@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { showDate } from "./utils";
+    import { showDate, unescapeHtmlChars } from "./utils";
     export let posts: any[];
 </script>
 
@@ -22,10 +22,17 @@
                     ><td>/u/{post.submitter}</td><td
                         >{post.flair === null ? "" : post.flair}</td
                     ><td class="post-title"
-                        ><a href={post.url}>{post.title}</a></td
+                        ><a href={post.url}>{unescapeHtmlChars(post.title)}</a
+                        ></td
                     ></tr
                 >
             {/each}
         </tbody>
     </table>
 {/if}
+
+<style>
+    td.post-title {
+        overflow-wrap: anywhere;
+    }
+</style>

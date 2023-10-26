@@ -1,3 +1,6 @@
+import showdown from "showdown";
+import sanitizeHtml from "sanitize-html";
+
 function pad(n: number) {
   return n < 10 ? `0${n}` : n;
 }
@@ -25,4 +28,14 @@ export async function getLoginUsername(cookies): Promise<string | null> {
       return json.username;
     }
   }
+}
+
+export function unescapeHtmlChars(html: string): string {
+    return html.replace(/&#x200B;/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+}
+
+export function markdown2HtmlSafe(md: string): string {
+    const converter = new showdown.Converter();
+    converter.setOption('tables', true);
+    return unescapeHtmlChars(sanitizeHtml(converter.makeHtml(md)));
 }

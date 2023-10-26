@@ -76,5 +76,6 @@
     button.small {
         font-size: 90%;
         padding: 0px;
+        font-family: inherit;
     }
 </style>

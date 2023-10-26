@@ -23,10 +23,6 @@ td {
   font-size: 90%;
 }
 
-td.post-title {
-  overflow-wrap: anywhere;
-}
-
 table, th, td {
   border: 1.5px solid;
 }
@@ -54,50 +50,4 @@ main {
 code {
   font-family: 'Fira Mono', monospace;
   font-size: 13px;
-}
-
-div.form-container {
-  display: flex;
-  justify-content: center;
-  margin: 20px;
-}
-
-form.aprimon-question {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 10px;
-  border: 2px solid black;
-  border-radius: 5px;
-  background-color: var(--pink);
-  align-items: center;
-}
-
-div#button-container {
-  display: flex;
-  gap: 35px;
-}
-
-button {
-  font-family: 'Nunito Sans', sans-serif;
-  font-size: 120%;
-  padding: 0px 10px;
-}
-
-span.title {
-  font-size: 120%;
-  font-weight: bold;
-}
-
-span.boxed-flair {
-  font-size: 80%;
-  border: 1px solid #000;
-  border-radius: 5px;
-  padding: 1px 5px;
-  margin-left: 10px;
-  vertical-align: text-top;
-}
-
-div.post-body {
-  padding: 0px 20px;
 }
