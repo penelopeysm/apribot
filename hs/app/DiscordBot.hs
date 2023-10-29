@@ -427,14 +427,20 @@ respondHA m = withContext ("respondHA (`" <> messageContent m <> "`)") $ do
     -- One species
     Just (pkmnId, name, form, _) -> do
       let fullName = mkFullName name form
-      let piplupDisclaimer =
-            if name `elem` ["Piplup", "Prinplup", "Empoleon"]
-              then "\n(Note that prior to SV, the Piplup family had Defiant as their HA.)"
-              else ""
+      let piplupNote = "(Note that prior to SV, the Piplup family had Defiant as their HA.)"
+          allNotes :: Map Text Text
+          allNotes =
+            M.fromList
+              [ ("Piplup", piplupNote),
+                ("Prinplup", piplupNote),
+                ("Empoleon", piplupNote),
+                ("Ferroseed", "(Note that Ferrothorn has Anticipation as its HA.)")
+              ]
+          note = case M.lookup name allNotes of Just d -> "\n" <> d; Nothing -> ""
       haAndFlavorText <- ha pkmnId
       case haAndFlavorText of
         -- No HA
-        Nothing -> replyTo m Nothing $ fullName <> " has no hidden ability."
+        Nothing -> replyTo m Nothing $ fullName <> " has no hidden ability." <> note
         -- HA
         Just (ha', desc') -> do
           restCall_ $
@@ -442,7 +448,7 @@ respondHA m = withContext ("respondHA (`" <> messageContent m <> "`)") $ do
               (messageChannelId m)
               ( def
                   { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
-                    DR.messageDetailedContent = fullName <> "'s hidden ability is: " <> ha' <> piplupDisclaimer,
+                    DR.messageDetailedContent = fullName <> "'s hidden ability is: " <> ha' <> note,
                     DR.messageDetailedAllowedMentions = Nothing,
                     DR.messageDetailedEmbeds = (: []) <$> makeEmbed (ha', desc')
                   }
@@ -489,7 +495,7 @@ respondLegality m = withContext ("respondLegality (`" <> messageContent m <> "`)
                             (True, True) -> "Cannot be bred"
                             (True, False) ->
                               if legality == GenLegality False False False False False
-                                then "No ball combos available"
+                                then "No rare ball combos available"
                                 else showLegality legality
                     )
                     (M.assocs legalities)
