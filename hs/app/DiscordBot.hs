@@ -681,7 +681,7 @@ makeThread m = withContext "makeThread" $ do
                                   restCall_ $
                                     DR.CreateMessageDetailed (channelId newThread) $
                                       def
-                                        { DR.messageDetailedContent = T.unlines . map ("> " <>) . T.lines $ messageContent firstMsg,
+                                        { DR.messageDetailedContent = quoteInThread (messageContent firstMsg),
                                           DR.messageDetailedAllowedMentions = Just $ mentionOnly []
                                         }
                                   restCall_ $
@@ -693,7 +693,7 @@ makeThread m = withContext "makeThread" $ do
                                   restCall_ $
                                     DR.CreateMessageDetailed (channelId newThread) $
                                       def
-                                        { DR.messageDetailedContent = T.unlines . map ("> " <>) . T.lines $ messageContent repliedMsg,
+                                        { DR.messageDetailedContent = quoteInThread (messageContent repliedMsg),
                                           DR.messageDetailedAllowedMentions = Just $ mentionOnly []
                                         }
                         _ -> replyTo m Nothing "You can only use this command within a forum thread."
@@ -952,6 +952,16 @@ getUserNick u maybeGid = withContext "getUserNick" $ do
 -- | Truncate a thread title to 100 characters
 truncateThreadTitle :: Text -> Text
 truncateThreadTitle t = if T.length t > 100 then T.take 97 t <> "..." else t
+
+quoteInThread :: Text -> Text
+quoteInThread t =
+  let quotedFullMessage = T.unlines . map ("> " <>) . T.lines $ t
+   in if T.length quotedFullMessage <= 2000
+        then quotedFullMessage
+        else case T.lines . T.take 1992 $ quotedFullMessage of
+          [] -> error "Not possible" -- There are at least 2000 characters!
+          [x] -> x <> " [...]"
+          xs -> T.unlines $ init xs ++ ["> [...]"]
 
 replyWithFile :: Message -> Text -> Text -> Text -> App DiscordHandler ()
 replyWithFile m msgContents fname fcontents = withContext "replyWithFile" $ do
