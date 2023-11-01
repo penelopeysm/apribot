@@ -152,7 +152,7 @@
                     on:click={() => {
                         clickedUser = tableRow.username;
                     }}
-                    class="clickable"
+                    class="clickable horizontal-name"
                     class:highlighted={tableRow.username === highlightedRow}
                     >{tableRow.username}</td
                 >
@@ -260,6 +260,10 @@
 {/if}
 
 <style>
+    :root {
+        --max-name-size: 135px;
+    }
+
     table {
         margin-top: 30px;
     }
@@ -292,20 +296,25 @@
         border-color: black;
     }
 
+    .horizontal-name {
+        min-width: var(--max-name-size);
+        width: var(--max-name-size);
+    }
+
     .rotated {
         white-space: nowrap;
         min-width: 25px;
         max-width: 25px;
         /* This value needs to account for the maximum height of the rotated inner div.
            There's no CSS-only way to calculate this, afaik (though you can use JavaScript) */
-        min-height: 135px;
-        height: 135px;
+        min-height: var(--max-name-size);
+        height: var(--max-name-size);
     }
 
     .rotated div {
         transform: rotate(-90deg);
         transform-origin: center left;
-        translate: 50% 65px;  /* Second value should be slightly less than half of the height above */
+        translate: 50% calc((var(--max-name-size) * 0.5) - 2px);
         height: max-content;
     }
 
