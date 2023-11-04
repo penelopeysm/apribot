@@ -149,6 +149,10 @@
         font-style: italic;
     }
 
+    button {
+        font-family: inherit;
+    }
+
     button.like-link {
         font-style: italic;
         background: none !important;
