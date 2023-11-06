@@ -113,7 +113,8 @@ eventHandler e = withContext "eventHandler" $ do
           when ("!help" == T.toLower msgText) (respondHelp m)
           when ("!potluck1" == T.toLower msgText) (respondPotluckVotes m)
           when ("!potluck2" == T.toLower msgText) (respondPotluckSignup m)
-          when ("!em " `T.isPrefixOf` T.toLower msgText) (respondEM m)
+          when ("!em " `T.isPrefixOf` T.toLower msgText) (respondEM False m)
+          when ("!emp " `T.isPrefixOf` T.toLower msgText) (respondEM True m)
           when ("!ha " `T.isPrefixOf` T.toLower msgText) (respondHA m)
           when ("!nature " `T.isPrefixOf` T.toLower msgText) (respondNature m)
           when ("!legality " `T.isPrefixOf` T.toLower msgText) (respondLegality m)
@@ -256,27 +257,28 @@ respondNature m = withContext ("respondNature (`" <> messageContent m <> "`)") $
                   <> "\n(Penny's sheet is at https://tinyurl.com/tgkss; Jemma's sheets have been lost to time.)"
           replyTo m Nothing text
 
-respondEM :: Message -> App DiscordHandler ()
-respondEM m = withContext ("respondEM (`" <> messageContent m <> "`)") $ do
+respondEM :: Bool -> Message -> App DiscordHandler ()
+respondEM withParents m = withContext ("respondEM (`" <> messageContent m <> "`)") $ do
+  let cmd = if withParents then "!emp" else "!em"
   let msgWords = T.words . T.toLower . T.strip $ messageContent m
   -- Parse message contents first
   result <- case msgWords of
-    "!em" : "usum" : rest -> do
+    _ : "usum" : rest -> do
       let pkmn = T.intercalate "-" rest
       pure $ Right (pkmn, USUM)
-    "!em" : "swsh" : rest -> do
+    _ : "swsh" : rest -> do
       let pkmn = T.intercalate "-" rest
       pure $ Right (pkmn, SwSh)
-    "!em" : "bdsp" : rest -> do
+    _ : "bdsp" : rest -> do
       let pkmn = T.intercalate "-" rest
       pure $ Right (pkmn, BDSP)
-    "!em" : "sv" : rest -> do
+    _ : "sv" : rest -> do
       let pkmn = T.intercalate "-" rest
       pure $ Right (pkmn, SV)
     _ -> pure $ Left ()
   case result of
     -- If message contents don't make sense, reply with usage
-    Left _ -> replyTo m Nothing "usage: `!em game pokemon` (game is usum, bdsp, swsh, or sv). e.g. `!em swsh togepi`"
+    Left _ -> replyTo m Nothing $ "usage: `" <> cmd <> " game pokemon` (game is usum, bdsp, swsh, or sv). e.g. `" <> cmd <> " swsh togepi`"
     Right (pkmn, game) -> do
       -- Try to fetch the Pokemon first. If it can't be found, choose some random moves
       pkmnDetails <- getPokemonIdsAndDetails pkmn
@@ -303,13 +305,7 @@ respondEM m = withContext ("respondEM (`" <> messageContent m <> "`)") $ do
         -- One exact match found. Calculate egg moves
         Just (id', name, form, _) -> do
           let fullName = mkFullName name form
-          -- Check if the message is in a DM
-          channel <- lift $ restCall $ DR.GetChannel (messageChannelId m)
-          let isDm = case channel of
-                Right (ChannelDirectMessage {}) -> True
-                _ -> False
-          -- If it is, respond in the DM
-          if isDm
+          if withParents
             then do
               ems <- getEmsWithParents game id'
               case ems of
@@ -328,7 +324,7 @@ respondEM m = withContext ("respondEM (`" <> messageContent m <> "`)") $ do
                   let emText = T.pack $ printf "%s egg moves in %s: %s" fullName (show game) (T.intercalate ", " (map emwpName ems'))
                   let embeds = map makeEmEmbedWithParents ems'
                   let postSubsequentEms remainingEmbeds =
-                        case splitAt 5 remainingEmbeds of
+                        case splitAt 4 remainingEmbeds of
                           ([], []) -> pure ()
                           (xs, ys) -> do
                             restCall_ $
@@ -342,7 +338,7 @@ respondEM m = withContext ("respondEM (`" <> messageContent m <> "`)") $ do
                                     }
                                 )
                             postSubsequentEms ys
-                  case splitAt 5 embeds of
+                  case splitAt 4 embeds of
                     (xs, ys) -> do
                       restCall_ $
                         DR.CreateMessageDetailed
@@ -356,7 +352,7 @@ respondEM m = withContext ("respondEM (`" <> messageContent m <> "`)") $ do
                           )
                       postSubsequentEms ys
             else do
-              -- Not in DMs
+              -- Parents not requested
               ems <- getEmsNoParents game id'
               case ems of
                 -- No egg moves
@@ -367,7 +363,7 @@ respondEM m = withContext ("respondEM (`" <> messageContent m <> "`)") $ do
                   let emText =
                         T.pack $
                           printf
-                            "%s egg moves in %s: %s\nFor full details about parents, use this command in a DM."
+                            "%s egg moves in %s: %s\nFor full details about parents, use `!emp {game} {pokemon}` instead."
                             fullName
                             (show game)
                             (T.intercalate ", " (map emnpName ems'))
@@ -756,7 +752,9 @@ respondHelp m = withContext "respondHelp" $ do
         "- `!ha {pokemon}`",
         "  Show the hidden ability of a Pokémon",
         "- `!em {game} {pokemon}`",
-        "  Show egg moves for a Pokémon in a game. `{game}` can be `usum`, `bdsp`, `swsh`, or `sv`. If you use this command in a DM with the bot, it will also list potential parents.",
+        "  Show egg moves for a Pokémon in a game. `{game}` can be `usum`, `bdsp`, `swsh`, or `sv`.",
+        "- `!emp {game} {pokemon}`",
+        "  Same as `!em`, but also show potential parents.",
         "- `!legality {pokemon}`",
         "  Show ball legality for a Pokémon across all available games.",
         "- `!nature {pokemon}`",
