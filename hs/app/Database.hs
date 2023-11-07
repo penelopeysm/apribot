@@ -1,5 +1,3 @@
-{-# LANGUAGE DeriveAnyClass #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE QuasiQuotes #-}
 
 -- | Database containing Reddit posts, as well as community votes on the posts.
@@ -32,25 +30,11 @@
 --    - scopes     : Text
 module Database
   ( addToDb,
-    PokemonDetails (..),
     HitStatus (..),
-    getAllNames,
-    getLatestHits,
-    getLatestNonHits,
-    wasHit,
-    getTotalRows,
-    getTotalMLAssignedRows,
-    getTotalMLAssignedHits,
-    getTotalNumberLabelled,
-    getTotalNumberNeedNotLabel,
-    getUserStats,
-    getNextUnlabelledPost,
-    addVote,
-    changeVote,
-    deleteVote,
-    getNumVotes,
     addNotifiedPost,
     checkNotifiedStatus,
+    wasHit,
+    addVote,
     addToken,
     getToken,
     removeToken,
@@ -59,7 +43,6 @@ module Database
 where
 
 import Control.Monad.IO.Class (MonadIO)
-import Data.Aeson
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -68,7 +51,6 @@ import Data.Time.Clock (UTCTime (..))
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.SqlQQ
 import Discord.Types (DiscordId (..), MessageId, unId, unSnowflake)
-import GHC.Generics (Generic)
 import Reddit
 import Reddit.Auth (Token (..), parseScopes, showScopes)
 import Trans
@@ -95,115 +77,12 @@ addToDb post hit = withAppPsqlConn $ \conn ->
         hit /= DefinitelyNegative
       )
 
-getLatestHits :: (MonadIO m) => Int -> App m [(Text, Text, Text, Text, UTCTime, Maybe Text)]
-getLatestHits n = withAppPsqlConn $ \conn ->
-  query
-    conn
-    [sql|SELECT id, url, title, submitter, utc_time, flair FROM posts
-         WHERE hit
-         ORDER BY utc_time DESC
-         LIMIT ?;|]
-    (Only n)
-
-getLatestNonHits :: (MonadIO m) => Int -> App m [(Text, Text, Text, Text, UTCTime, Maybe Text)]
-getLatestNonHits n = withAppPsqlConn $ \conn ->
-  query
-    conn
-    [sql|SELECT id, url, title, submitter, utc_time, flair FROM posts
-         WHERE NOT hit
-         ORDER BY utc_time DESC
-         LIMIT ?;|]
-    (Only n)
-
 wasHit :: (MonadIO m) => Text -> App m Bool
 wasHit postId = withAppPsqlConn $ \conn -> do
   hits <- query conn "SELECT hit FROM posts WHERE id = ?;" (Only postId)
   case hits of
     [] -> pure False
     (h : _) -> pure (fromOnly h)
-
-getTotalRows :: (MonadIO m) => App m Int
-getTotalRows = withAppPsqlConn $ \conn -> do
-  fromOnly . head
-    <$> query_ conn "SELECT COUNT(*) FROM posts;"
-
-getTotalMLAssignedRows :: (MonadIO m) => App m Int
-getTotalMLAssignedRows = withAppPsqlConn $ \conn -> do
-  fromOnly . head
-    <$> query_ conn "SELECT COUNT(*) FROM posts WHERE hit IS NOT NULL;"
-
-getTotalMLAssignedHits :: (MonadIO m) => App m Int
-getTotalMLAssignedHits = withAppPsqlConn $ \conn -> do
-  fromOnly . head
-    <$> query_ conn "SELECT COUNT(*) FROM posts WHERE hit;"
-
-getTotalNumberLabelled :: (MonadIO m) => App m Int
-getTotalNumberLabelled = withAppPsqlConn $ \conn -> do
-  fromOnly . head
-    <$> query_ conn "SELECT COUNT(DISTINCT post_id) FROM votes;"
-
-getTotalNumberNeedNotLabel :: (MonadIO m) => App m Int
-getTotalNumberNeedNotLabel = withAppPsqlConn $ \conn -> do
-  fromOnly . head
-    <$> query_ conn "SELECT COUNT(*) FROM posts WHERE NOT needs_review;"
-
-data VoteResponse = VoteResponse
-  { vote_postId :: Text,
-    vote_postTitle :: Text,
-    vote_postUrl :: Text,
-    vote_postSubmitter :: Text,
-    vote_vote :: Bool
-  }
-  deriving (Generic, Show)
-
-instance ToJSON VoteResponse where
-  toJSON = genericToJSON $ defaultOptions {fieldLabelModifier = drop 5}
-
-data UserStatsResponse = UserStatsResponse
-  { totalVotes :: Int,
-    totalPositiveVotes :: Int,
-    votes :: [VoteResponse]
-  }
-  deriving (Generic, Show, ToJSON)
-
--- | Get:
--- 1. The total number of votes by a user
--- 2. The number of those that the user labelled as hits
--- 3. The most recent @nVotes@ votes. Returned in descending order of time, i.e.
--- most recent votes first.
-getUserStats :: (MonadIO m) => Int -> Text -> App m UserStatsResponse
-getUserStats nVotes username = do
-  (total, hits, votes) <- withAppPsqlConn $ \conn -> do
-    total <- fromOnly . head <$> query conn "SELECT COUNT(*) FROM votes WHERE username = ?;" (Only username)
-    hits <- fromOnly . head <$> query conn "SELECT COUNT(*) FROM votes WHERE username = ? AND vote;" (Only username)
-    votes <-
-      query
-        conn
-        [sql|SELECT v.post_id, p.title, p.url, p.submitter, v.vote
-           FROM posts as p
-           INNER JOIN votes as v ON p.id = v.post_id
-           WHERE v.username = ?
-           ORDER BY v.id DESC
-           LIMIT ?|]
-        (username, nVotes)
-    pure (total, hits, map (\(a, b, c, d, e) -> VoteResponse a b c d e) votes)
-  pure $ UserStatsResponse {totalVotes = total, totalPositiveVotes = hits, votes = votes}
-
--- | Returns post ID, URL, title, body, submitter, time, flair
-getNextUnlabelledPost :: (MonadIO m) => App m (Maybe (Text, Text, Text, Text, Text, UTCTime, Maybe Text))
-getNextUnlabelledPost = withAppPsqlConn $ \conn -> do
-  unlabelled <-
-    query_
-      conn
-      [sql|SELECT id, url, title, body, submitter, utc_time, flair
-           FROM posts
-           WHERE id NOT IN (SELECT post_id FROM votes)
-                 AND needs_review
-           ORDER BY RANDOM()
-           LIMIT 1;|]
-  case unlabelled of
-    [] -> pure Nothing
-    (p : _) -> pure (Just p)
 
 -- | Record a user's vote on a post
 addVote :: (MonadIO m) => Text -> Text -> Bool -> App m ()
@@ -213,27 +92,6 @@ addVote postId voter vote = withAppPsqlConn $ \conn -> do
       conn
       "INSERT INTO votes (post_id, username, vote) VALUES (?,?,?)"
       (postId, voter, vote)
-
-changeVote :: MonadIO m => Text -> Text -> App m ()
-changeVote postId voter = withAppPsqlConn $ \conn -> do
-  void $
-    execute
-      conn
-      "UPDATE votes SET vote = NOT vote WHERE post_id = ? AND username = ?"
-      (postId, voter)
-
-deleteVote :: MonadIO m => Text -> Text -> App m ()
-deleteVote postId voter = withAppPsqlConn $ \conn -> do
-  void $
-    execute
-      conn
-      "DELETE FROM votes WHERE post_id = ? AND username = ?"
-      (postId, voter)
-
-getNumVotes :: (MonadIO m) => App m Int
-getNumVotes = withAppPsqlConn $ \conn -> do
-  fromOnly . head
-    <$> query_ conn "SELECT COUNT(*) FROM votes;"
 
 addNotifiedPost :: (MonadIO m) => ID Post -> MessageId -> App m ()
 addNotifiedPost postId messageId = withAppPsqlConn $ \conn -> do
@@ -321,19 +179,3 @@ updateToken identifier tkn = withAppPsqlConn $ \conn -> do
       conn
       "UPDATE tokens SET token = ?, token_type = ?, expires_at = ?, scopes = ? WHERE id = ?;"
       (token, tokenType, expiresAt, scopes, identifier)
-
-data PokemonDetails = PokemonDetails
-  { pkmn_id :: Int,
-    pkmn_name :: Text,
-    pkmn_form :: Maybe Text,
-    pkmn_unique_name :: Text
-  }
-  deriving (Generic, Show)
-
-instance ToJSON PokemonDetails where
-  toJSON = genericToJSON $ defaultOptions {fieldLabelModifier = drop 5}
-
-getAllNames :: (MonadIO m) => App m [PokemonDetails]
-getAllNames = withAppPsqlConn $ \conn -> do
-  results <- query_ conn "SELECT id, name, form, unique_name FROM pokemon ORDER BY ndex ASC;"
-  pure $ map (\(a, b, c, d) -> PokemonDetails a b c d) results

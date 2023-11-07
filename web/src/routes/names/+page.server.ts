@@ -1,6 +1,6 @@
-import type { Name } from "./types";
+import { getAllNames } from "$lib/server/database";
 
-export async function load({ fetch }) {
-    const names: Name[] = await fetch("http://localhost:8080/api/names").then((res) => res.json());
+export async function load() {
+    const names = await getAllNames();
     return { names };
 }

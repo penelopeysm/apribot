@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { showDate } from "../utils";
+    import { showDate } from "$lib/utils";
     import { onMount } from "svelte";
     export let data;
 

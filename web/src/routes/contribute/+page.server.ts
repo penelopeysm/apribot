@@ -1,37 +1,31 @@
-import type { Post } from "../types";
-import { getLoginUsername, unescapeHtmlChars, markdown2HtmlSafe } from "../utils";
+import type { Post } from "$lib/types";
+import { getLoginUsername } from "$lib/utils";
 import { redirect } from "@sveltejs/kit";
+import {
+    getTotalPosts,
+    getTotalLabelled,
+    getTotalNeedNotLabel,
+    getTotalLabelledBy,
+    getNextUnlabelled,
+} from "$lib/server/database";
 
-export async function load({ parent, fetch }) {
-    const nextUnlabelled = await fetch("http://localhost:8080/api/next_unlabelled").then((res) => res.json());
-    const mlStats = await fetch("http://localhost:8080/api/ml_stats").then((res) => res.json());
-
+export async function load({ parent }) {
     const parentData = await parent();
-    let labelledByUser: number | null;
-    let next: Post | null;
 
-    if (parentData.username === null) {
-        labelledByUser = null;
-        next = null;
-    } else {
-        // Get number of posts labelled by user
-        const userStats = await fetch(`http://localhost:8080/api/user_stats?username=${parentData.username}&limit=1`).then(res => res.json());
-        labelledByUser = userStats.totalVotes;
-        // Get next post not yet labelled by user
-        if (nextUnlabelled.error === "no_posts_needing_review") {
-            next = null;
-        } else {
-            next = nextUnlabelled.post as Post;
-            next.title = unescapeHtmlChars(next.title);
-            next.body = markdown2HtmlSafe(next.body);
-            next.time = new Date(next.time);
-        }
-    }
+    const totalSeen = await getTotalPosts();
+    const totalLabelled = await getTotalLabelled();
+    const totalNeedNotLabel = await getTotalNeedNotLabel();
+    const labelledByUser: number | null = parentData.username === null
+        ? null
+        : await getTotalLabelledBy(parentData.username);
+    const next: Post | null = parentData.username === null
+        ? null
+        : await getNextUnlabelled();
 
     return {
-        totalSeen: mlStats.seen,
-        totalLabelled: mlStats.labelled,
-        totalNeedNotLabel: mlStats.need_not_label,
+        totalSeen,
+        totalLabelled,
+        totalNeedNotLabel,
         labelledByUser: labelledByUser,
         nextUnlabelled: next,
     }

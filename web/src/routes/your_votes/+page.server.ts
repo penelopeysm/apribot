@@ -1,66 +1,45 @@
 import { redirect } from '@sveltejs/kit';
-import { getLoginUsername } from '../utils';
+import { getLoginUsername } from '$lib/utils';
+import {
+    getTotalLabelledBy,
+    getTotalPositiveLabelledBy,
+    getLatestVotesBy,
+    changeVote,
+    deleteVote,
+} from '$lib/server/database';
 
-type UserStatsResponse = {
-  totalVotes: number;
-  totalPositiveVotes: number;
-  votes: VoteResponse[];
+export async function load({ parent }) {
+    const parentData = await parent();
+
+    if (parentData.username === null) {
+        throw redirect(307, '/');
+    }
+    else {
+        const totalVotes = await getTotalLabelledBy(parentData.username);
+        const totalPositiveVotes = await getTotalPositiveLabelledBy(parentData.username);
+        const latestVotes = await getLatestVotesBy(parentData.username, 100);
+        return { totalVotes, totalPositiveVotes, latestVotes };
+    }
 }
 
-type VoteResponse = {
-  postId: string;
-  postTitle: string;
-  postUrl: string;
-  postSubmitter: string;
-  vote: boolean;
-}
-
-export async function load({ parent, fetch }) {
-  const parentData = await parent();
-
-  if (parentData.username === null) {
-    throw redirect(307, '/');
-  }
-  else {
-    const resp: UserStatsResponse = await fetch(`http://localhost:8080/api/user_stats?username=${parentData.username}&limit=100`)
-      .then(res => res.json());
-    return resp;
-  }
-}
 
 export const actions = {
-  change: async ({ fetch, request, cookies }) => {
-    const data = await request.formData();
-    const username = await getLoginUsername(cookies);
+    change: async ({ request, cookies }) => {
+        const data = await request.formData();
+        const username = await getLoginUsername(cookies);
 
-    const backendResp = await fetch('http://localhost:8080/api/change_vote', {
-      method: 'POST',
-      body: JSON.stringify({
-        vote_post_id: data.get('id'),
-        vote_username: username,
-      }),
-    }).then((r) => r.json());
+        if (username !== null) {
+            await changeVote(username, data.get('id') as string);
+        }
+        throw redirect(301, '/your_votes');
+    },
 
-    if (backendResp.success) {
-      throw redirect(301, '/your_votes');
-    }
-  },
-
-  delete: async ({ fetch, request, cookies }) => {
-    const data = await request.formData();
-    const username = await getLoginUsername(cookies);
-
-
-    const backendResp = await fetch('http://localhost:8080/api/delete_vote', {
-      method: 'POST',
-      body: JSON.stringify({
-        vote_post_id: data.get('id'),
-        vote_username: username,
-      }),
-    }).then((r) => r.json());
-
-    if (backendResp.success) {
-      throw redirect(301, '/your_votes');
-    }
-  },
+    delete: async ({ request, cookies }) => {
+        const data = await request.formData();
+        const username = await getLoginUsername(cookies);
+        if (username !== null) {
+            await deleteVote(username, data.get('id') as string);
+        }
+        throw redirect(301, '/your_votes');
+    },
 }

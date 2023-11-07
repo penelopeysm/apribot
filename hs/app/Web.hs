@@ -10,8 +10,8 @@ import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy as TL
-import Data.Time.Clock (UTCTime (..), getCurrentTime)
-import Database
+import Data.Time.Clock (getCurrentTime)
+import qualified Database as DB
 import DiscordBot (notifyDiscord)
 import GHC.Generics
 import Network.HTTP.Types.Status
@@ -25,33 +25,6 @@ import qualified Web.Scotty.Trans as ST
 newtype RedditLoggedInResponse = RedditLoggedInResponse
   {sessionId :: Text}
   deriving (Show, Generic, ToJSON, FromJSON)
-
--- | /api/total_assigned
-data TotalAssignedResponse = TotalAssignedResponse
-  {rows :: Int, hits :: Int}
-  deriving (Generic, Show, ToJSON)
-
-data RedditPostDetails = RedditPostDetails
-  { post_id :: Text,
-    post_url :: Text,
-    post_title :: Text,
-    post_body :: Text,
-    post_submitter :: Text,
-    post_time :: UTCTime,
-    post_flair :: Maybe Text
-  }
-  deriving (Generic, Show)
-
-instance ToJSON RedditPostDetails where
-  toJSON = genericToJSON $ defaultOptions {fieldLabelModifier = drop 5}
-
--- | /api/ml_stats
-data MLStatsResponse = MLStatsResponse
-  { seen :: Int,
-    labelled :: Int,
-    need_not_label :: Int
-  }
-  deriving (Generic, Show, ToJSON)
 
 newtype BackendError = BackendError
   { error :: Text
@@ -89,33 +62,7 @@ web = do
   ST.scottyT (cfgPort cfg) (runAppWith cfg) $ do
     -- everything inside here is ~ ScottyT TL.Text (App IO) ()
     -- need the type application to suppress ambiguous type warning
-    ST.get @TL.Text "/api/total_assigned" $ do
-      totalRows <- lift getTotalMLAssignedRows
-      totalHits <- lift getTotalMLAssignedHits
-      ST.json $ TotalAssignedResponse totalRows totalHits
-
-    ST.get "/api/names" $ do
-      lift getAllNames >>= ST.json
-
-    ST.get "/api/hits" $ do
-      nPosts :: Int <- ST.param "limit" `ST.rescue` const (pure 50)
-      posts <- lift $ getLatestHits nPosts
-      -- TODO: Ugly. The conversion should be done in getLatestHits
-      ST.json $ map (\(a, b, c, d, e, f) -> RedditPostDetails a b c "" d e f) posts
-
-    ST.get "/api/nonhits" $ do
-      nPosts :: Int <- ST.param "limit" `ST.rescue` const (pure 50)
-      posts <- lift $ getLatestNonHits nPosts
-      -- TODO: Ugly. The conversion should be done in getLatestHits
-      ST.json $ map (\(a, b, c, d, e, f) -> RedditPostDetails a b c "" d e f) posts
-
-    ST.get "/api/ml_stats" $ do
-      totalPosts <- lift getTotalRows
-      labelledPosts <- lift getTotalNumberLabelled
-      needNotLabel <- lift getTotalNumberNeedNotLabel
-      ST.json $ MLStatsResponse totalPosts labelledPosts needNotLabel
-
-    ST.post "/api/login_username" $ do
+    ST.post @TL.Text "/api/login_username" $ do
       let clientId = cfgRedditFrontendId cfg
           clientSecret = cfgRedditFrontendSecret cfg
           userAgent = cfgUserAgent cfg
@@ -125,7 +72,7 @@ web = do
           ST.status status400
           ST.json $ BackendError "No session ID provided"
         Just (RedditLoggedInResponse sessionId) -> do
-          maybeToken <- lift $ getToken sessionId
+          maybeToken <- lift $ DB.getToken sessionId
           case maybeToken of
             Nothing -> do
               ST.status status401
@@ -139,7 +86,7 @@ web = do
                   then do
                     rt <- liftIO $ refresh clientId clientSecret userAgent t
                     lift $ atomically $ T.putStrLn "refreshing token"
-                    lift $ updateToken sessionId rt
+                    lift $ DB.updateToken sessionId rt
                     pure rt
                   else pure t
               -- Get the logged in user's name using the token
@@ -173,7 +120,7 @@ web = do
           -- Generate a random session ID for the user and store the token in the
           -- database using this
           sessionId <- liftIO $ randomText 60
-          lift $ addToken sessionId t
+          lift $ DB.addToken sessionId t
           -- Return the session ID
           ST.json $ RedditLoggedInResponse sessionId
 
@@ -205,7 +152,7 @@ web = do
           ST.status status400
           ST.json $ BackendError "No session ID provided"
         Just (RedditLoggedInResponse sessionId) -> do
-          lift $ removeToken sessionId
+          lift $ DB.removeToken sessionId
           ST.json $ object ["success" .= True]
 
     ST.post "/api/contribute" $ do
@@ -215,8 +162,8 @@ web = do
           if vote /= 0 && vote /= 1
             then ST.json $ BackendError "invalid_vote"
             else do
-              lift $ addVote postId voter (vote == 1)
-              hit <- lift $ wasHit postId
+              lift $ DB.addVote postId voter (vote == 1)
+              hit <- lift $ DB.wasHit postId
               when (not hit && vote == 1) $ lift $ do
                 atomically $ T.putStrLn ("Notifying about false negative " <> postId)
                 notifyDiscord (NotifyPostById (PostID postId))
@@ -225,36 +172,3 @@ web = do
                 notifyDiscord (UnnotifyPostById (PostID postId))
               ST.json $ object ["success" .= True]
         Nothing -> ST.json $ BackendError "invalid_vote"
-
-    ST.get "/api/user_stats" $ do
-      username :: Text <- ST.param "username"
-      n :: Int <- ST.param "limit" `ST.rescue` const (pure 100)
-      userStats <- lift $ getUserStats n username
-      ST.json userStats
-
-    ST.get "/api/next_unlabelled" $ do
-      nextPost <- lift getNextUnlabelledPost
-      case nextPost of
-        Nothing -> ST.json $ BackendError "no_posts_needing_review"
-        Just (a, b, c, d, e, f, g) ->
-          ST.json $
-            object
-              [ "error" .= ("" :: Text),
-                "post" .= RedditPostDetails a b c d e f g
-              ]
-
-    ST.post "/api/change_vote" $ do
-      maybeVoteChange :: Maybe VoteChangeParam <- decode <$> ST.body
-      case maybeVoteChange of
-        Nothing -> ST.json $ BackendError "invalid_change_vote"
-        Just (VoteChangeParam postId voter) -> do
-          lift $ changeVote postId voter
-          ST.json $ object ["success" .= True]
-
-    ST.post "/api/delete_vote" $ do
-      maybeVoteChange :: Maybe VoteChangeParam <- decode <$> ST.body
-      case maybeVoteChange of
-        Nothing -> ST.json $ BackendError "invalid_delete_vote"
-        Just (VoteChangeParam postId voter) -> do
-          lift $ deleteVote postId voter
-          ST.json $ object ["success" .= True]

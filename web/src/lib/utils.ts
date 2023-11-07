@@ -1,5 +1,6 @@
 import showdown from "showdown";
 import sanitizeHtml from "sanitize-html";
+import type { UnsafePost, Post } from "$lib/types";
 
 function pad(n: number) {
   return n < 10 ? `0${n}` : n;
@@ -9,7 +10,6 @@ export function showDate(d: Date) {
   // getMonth returns 0 for January (?!)
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
-
 
 export async function getLoginUsername(cookies): Promise<string | null> {
   const sessionId = cookies.get('apribotSessionId');
@@ -30,12 +30,24 @@ export async function getLoginUsername(cookies): Promise<string | null> {
   }
 }
 
-export function unescapeHtmlChars(html: string): string {
-    return html.replace(/&#x200B;/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+function unescapeHtmlChars(html: string): string {
+  return html.replace(/&#x200B;/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 }
 
-export function markdown2HtmlSafe(md: string): string {
-    const converter = new showdown.Converter();
-    converter.setOption('tables', true);
-    return unescapeHtmlChars(sanitizeHtml(converter.makeHtml(md)));
+function markdown2HtmlSafe(md: string): string {
+  const converter = new showdown.Converter();
+  converter.setOption('tables', true);
+  return unescapeHtmlChars(sanitizeHtml(converter.makeHtml(md)));
+}
+
+export function sanitisePost(unsafe: UnsafePost): Post {
+  return {
+    id: unsafe.unsafeId,
+    time: unsafe.unsafeTime,
+    title: unescapeHtmlChars(unsafe.unsafeTitle),
+    body: markdown2HtmlSafe(unsafe.unsafeBody),
+    flair: unsafe.unsafeFlair,
+    url: unsafe.unsafeUrl,
+    submitter: unsafe.unsafeSubmitter,
+  }
 }

@@ -1,5 +1,5 @@
 <script lang="ts">
-    import type { Name } from "./types";
+    import type { Name } from "$lib/types";
     export let data;
 
     let searchQuery = "";
@@ -78,6 +78,6 @@
     td.unique-name {
         font-family: "Fira Mono", monospace;
         font-weight: bold;
-        font-size: 120%;
+        font-size: 100%;
     }
 </style>
