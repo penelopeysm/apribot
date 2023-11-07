@@ -1,10 +1,13 @@
-import { Client } from "pg";
+// Instead of `import {Client} from "pg"` we need a slightly awkward
+// construction here to make `npm run build` work. This is because pg is a
+// CommonJS module.
+import pg from "pg";
 import type { Post, Name, Vote } from "$lib/types";
 import config from "$lib/server/config";
 import { sanitisePost } from "$lib/utils";
 
-async function withClient(async_callback: (client: Client) => Promise<any>) {
-    const client = new Client({ connectionString: config.dbUrl });
+async function withClient(async_callback: (client: pg.Client) => Promise<any>) {
+    const client = new pg.Client({ connectionString: config.dbUrl });
     await client.connect();
     const res = await async_callback(client);
     client.end();
