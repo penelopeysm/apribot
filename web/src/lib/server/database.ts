@@ -3,11 +3,16 @@
 // CommonJS module.
 import pg from "pg";
 import type { Post, Name, Vote } from "$lib/types";
-import config from "$lib/server/config";
 import { sanitisePost } from "$lib/utils";
+import { env } from "$env/dynamic/private";
+
+const dbUrl = env.FLY_APP_NAME === undefined ? env.FLY_PG_PROXY_CONN_STRING : env.DATABASE_URL;
 
 async function withClient(async_callback: (client: pg.Client) => Promise<any>) {
-    const client = new pg.Client({ connectionString: config.dbUrl });
+    if (dbUrl === undefined) {
+        throw new Error("Database URL is undefined. You need to set the appropriate environment variables.");
+    }
+    const client = new pg.Client({ connectionString: dbUrl });
     await client.connect();
     const res = await async_callback(client);
     client.end();
