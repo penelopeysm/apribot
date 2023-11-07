@@ -48,14 +48,17 @@ potluck1 = PotluckVotes <$ lexeme (C.string' "!potluck1")
 potluck2 :: Parser DiscordCommand
 potluck2 = PotluckSignup <$ lexeme (C.string' "!potluck2")
 
+parsePkmnName :: Parser Text
+parsePkmnName = lexeme (takeWhile1P Nothing (const True))
+
 ha :: Parser DiscordCommand
-ha = HA <$> (lexeme (C.string' "!ha") *> lexeme takeRest)
+ha = HA <$> (lexeme (C.string' "!ha") *> optional parsePkmnName)
 
 nature :: Parser DiscordCommand
-nature = Nature <$> (lexeme (C.string' "!nature") *> lexeme takeRest)
+nature = Nature <$> (lexeme (C.string' "!nature") *> optional parsePkmnName)
 
 legality :: Parser DiscordCommand
-legality = Legality <$> (lexeme (C.string' "!legality") *> lexeme takeRest)
+legality = Legality <$> (lexeme (C.string' "!legality") *> optional parsePkmnName)
 
 parseGame :: Parser Game
 parseGame =
@@ -66,9 +69,6 @@ parseGame =
         BDSP <$ C.string' "bdsp",
         SV <$ C.string' "sv"
       ]
-
-parsePkmnName :: Parser Text
-parsePkmnName = lexeme (takeWhile1P Nothing (const True))
 
 parseGameAndPkmn :: Parser (Maybe Game, Maybe Text)
 parseGameAndPkmn = do
