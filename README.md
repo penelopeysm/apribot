@@ -14,7 +14,7 @@ The codebase comprises several parts:
      - posts all bankballexchange posts into another channel;
      - provides various server commands to aid with trading and to provide information about hidden abilities / egg moves / etc.
    - A small REST API (`hs/app/Web.hs`), which the SvelteKit site uses
-   - Separately, there is a small website written in in SvelteKit (`web`) which provides information about the bot and allows Reddit users to log in and manually, retroactively, label posts (so that they can be used for ML training);
+ - Separately, there is a small website written in in SvelteKit (`web`) which provides information about the bot and allows Reddit users to log in and manually, retroactively, label posts (so that they can be used for ML training);
  - Finally, there is a PostgreSQL database which threads everything together.
 
 ApriBot is currently hosted on [Fly.io](https://fly.io).
