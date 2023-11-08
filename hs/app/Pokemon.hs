@@ -59,7 +59,13 @@ makeName name form = case form of
 
 getPokemonIdsAndDetails :: (MonadIO m) => Text -> App m (Maybe (Int, Text, Maybe Text, Text))
 getPokemonIdsAndDetails name = do
-  let hyphenatedName = T.intercalate "-" $ T.words name
+  let hyphenatedName =
+        T.replace "farfetch'd" "farfetchd"
+          . T.replace "mr.-mime" "mr-mime"
+          . T.toLower
+          . T.intercalate "-"
+          . T.words
+          $ name
   results <- withAppPsqlConn $ \conn ->
     query
       conn
