@@ -104,26 +104,24 @@ eventHandler e = withContext "eventHandler" $ do
             addRole (reactionGuildId rinfo) (reactionUserId rinfo) (reactionEmoji rinfo)
         Nothing -> pure ()
     MessageCreate m -> do
-      -- If running locally, ignore messages from other users
-      if not (cfgOnFly cfg) && userId (messageAuthor m) /= mkId 236863453443260419
-        then pure ()
-        else do
-          let content = T.strip (messageContent m)
-          when ("!" `T.isPrefixOf` content) $ do
-            let cmd = parseDiscordCommand content
-            logToDiscord (tshow cmd)
-            case cmd of
-              Nothing -> pure ()
-              Just Help -> respondHelp m
-              Just Thread -> makeThread m
-              Just CloseThread -> closeThread m
-              Just PotluckVotes -> respondPotluckVotes m
-              Just PotluckSignup -> respondPotluckSignup m
-              Just (HA pkmnName) -> respondHA m pkmnName
-              Just (EM game pkmnName) -> respondEM False m game pkmnName
-              Just (EMParents game pkmnName) -> respondEM True m game pkmnName
-              Just (Nature pkmnName) -> respondNature m pkmnName
-              Just (Legality pkmnName) -> respondLegality m pkmnName
+      -- Only respond if deployed, or the message is from myself
+      when (cfgOnFly cfg || userId (messageAuthor m) == mkId 236863453443260419) $ do
+        let content = T.strip (messageContent m)
+        when ("!" `T.isPrefixOf` content) $ do
+          let cmd = parseDiscordCommand content
+          logToDiscord (tshow cmd)
+          case cmd of
+            Nothing -> pure ()
+            Just Help -> respondHelp m
+            Just Thread -> makeThread m
+            Just CloseThread -> closeThread m
+            Just PotluckVotes -> respondPotluckVotes m
+            Just PotluckSignup -> respondPotluckSignup m
+            Just (HA pkmnName) -> respondHA m pkmnName
+            Just (EM game pkmnName) -> respondEM False m game pkmnName
+            Just (EMParents game pkmnName) -> respondEM True m game pkmnName
+            Just (Nature pkmnName) -> respondNature m pkmnName
+            Just (Legality pkmnName) -> respondLegality m pkmnName
     -- Ignore other events (for now)
     _ -> pure ()
 
@@ -230,6 +228,18 @@ createEmEmbedDescription em' =
           xs -> ["**Parents which learn by breeding**\n" <> T.intercalate ", " xs]
    in T.intercalate "\n\n" (emwpFlavorText em' : levelUpParents <> breedParents)
 
+didYouMean :: [Text] -> Text
+didYouMean xs =
+  let bolden t = "**" <> t <> "**"
+      website = "If you're having trouble finding a Pokémon, try looking it up at https://apribot.fly.dev/names"
+   in "\n\n("
+        <> ( case xs of
+               [] -> website
+               [x] -> "Did you mean: " <> bolden x <> "? " <> website
+               _ -> "Did you mean any of these: " <> T.intercalate ", " (map bolden xs) <> "? " <> website
+           )
+        <> ")"
+
 respondNature :: Message -> Maybe Text -> App DiscordHandler ()
 respondNature m mPkmn = withContext ("respondNature (`" <> messageContent m <> "`)") $ do
   case mPkmn of
@@ -238,8 +248,13 @@ respondNature m mPkmn = withContext ("respondNature (`" <> messageContent m <> "
       -- Try to fetch the Pokemon first.
       pkmnDetails <- getPokemonIdsAndDetails pkmn
       case pkmnDetails of
-        Nothing -> replyTo m Nothing $ "No Pokémon with name '" <> pkmn <> "' found.\n(If you're having trouble finding a Pokémon, try looking it up at https://apribot.fly.dev/names)"
-        Just (pkmnId, pkmnName, pkmnForm, _) -> do
+        NoneFound ->
+          replyTo m Nothing $
+            "No Pokémon with name '" <> pkmn <> "' found." <> didYouMean []
+        NoneFoundButSuggesting uniqueNames ->
+          replyTo m Nothing $
+            "No Pokémon with name '" <> pkmn <> "' found." <> didYouMean uniqueNames
+        FoundOne (pkmnId, pkmnName, pkmnForm, _) -> do
           let fullName = mkFullName pkmnName pkmnForm
           suggestedNatures <- getSuggestedNatures pkmnId
           liftIO $ T.putStrLn "hi2"
@@ -265,6 +280,27 @@ respondNature m mPkmn = withContext ("respondNature (`" <> messageContent m <> "
                       <> "\n(Penny's sheet is at https://tinyurl.com/tgkss; Jemma's sheets have been lost to time.)"
               replyTo m Nothing text
 
+giveRandomEMs :: Message -> Text -> [Text] -> App DiscordHandler ()
+giveRandomEMs m requestedPokemon suggestedUniqueNames = do
+  moveDescs <- randomMoves
+  let messageText = "I don't think " <> requestedPokemon <> " is a Pokemon, but if it was, it would have the egg moves: " <> T.intercalate ", " (map fst moveDescs) <> "!" <> didYouMean suggestedUniqueNames
+  let embed =
+        def
+          { createEmbedTitle = "Descriptions",
+            createEmbedDescription = T.intercalate "\n" (map (\(m', d') -> "**" <> m' <> "**: " <> d') moveDescs),
+            createEmbedColor = Just DiscordColorLuminousVividPink
+          }
+  restCall_ $
+    DR.CreateMessageDetailed
+      (messageChannelId m)
+      ( def
+          { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
+            DR.messageDetailedContent = messageText,
+            DR.messageDetailedAllowedMentions = Nothing,
+            DR.messageDetailedEmbeds = Just [embed]
+          }
+      )
+
 respondEM :: Bool -> Message -> Maybe Game -> Maybe Text -> App DiscordHandler ()
 respondEM withParents m mGame mPkmn = withContext ("respondEM (`" <> messageContent m <> "`)") $ do
   let cmd = if withParents then "!emp" else "!em"
@@ -278,27 +314,10 @@ respondEM withParents m mGame mPkmn = withContext ("respondEM (`" <> messageCont
       -- Try to fetch the Pokemon first. If it can't be found, choose some random moves
       pkmnDetails <- getPokemonIdsAndDetails pkmn
       case pkmnDetails of
-        Nothing -> do
-          moveDescs <- randomMoves
-          let messageText = "I don't think " <> pkmn <> " is a Pokemon, but if it was, it would have the egg moves: " <> T.intercalate ", " (map fst moveDescs) <> "!\n(If you were trying to find a real Pokémon, try looking it up at https://apribot.fly.dev/names)"
-          let embed =
-                def
-                  { createEmbedTitle = "Descriptions",
-                    createEmbedDescription = T.intercalate "\n" (map (\(m', d') -> "**" <> m' <> "**: " <> d') moveDescs),
-                    createEmbedColor = Just DiscordColorLuminousVividPink
-                  }
-          restCall_ $
-            DR.CreateMessageDetailed
-              (messageChannelId m)
-              ( def
-                  { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
-                    DR.messageDetailedContent = messageText,
-                    DR.messageDetailedAllowedMentions = Nothing,
-                    DR.messageDetailedEmbeds = Just [embed]
-                  }
-              )
+        NoneFound -> giveRandomEMs m pkmn []
+        NoneFoundButSuggesting uniqueNames -> giveRandomEMs m pkmn uniqueNames
         -- One exact match found. Calculate egg moves
-        Just (id', name, form, _) -> do
+        FoundOne (id', name, form, _) -> do
           let fullName = mkFullName name form
           if withParents
             then do
@@ -379,45 +398,50 @@ respondEM withParents m mGame mPkmn = withContext ("respondEM (`" <> messageCont
                           }
                       )
 
+makeHAEmbed :: (Text, Text) -> Maybe CreateEmbed
+makeHAEmbed (ha', desc') =
+  if desc' == ""
+    then Nothing
+    else
+      Just $
+        def
+          { createEmbedTitle = ha',
+            createEmbedDescription = desc',
+            createEmbedUrl =
+              "https://bulbapedia.bulbagarden.net/wiki/"
+                <> (T.intercalate "_" . T.words $ ha')
+                <> "_(Ability)",
+            createEmbedColor = Just DiscordColorLuminousVividPink
+          }
+
+giveRandomHA :: Message -> Text -> [Text] -> App DiscordHandler ()
+giveRandomHA m requestedPokemon suggestedUniqueNames = do
+  (ha', desc') <- randomAbility
+  restCall_ $
+    DR.CreateMessageDetailed
+      (messageChannelId m)
+      ( def
+          { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
+            DR.messageDetailedContent = "I don't think " <> requestedPokemon <> " is a Pokemon, but if it was, it would have the hidden ability " <> ha' <> "!" <> didYouMean suggestedUniqueNames,
+            DR.messageDetailedAllowedMentions = Nothing,
+            DR.messageDetailedEmbeds = (: []) <$> makeHAEmbed (ha', desc')
+          }
+      )
+
 respondHA :: Message -> Maybe Text -> App DiscordHandler ()
 respondHA m mPkmn = withContext ("respondHA (`" <> messageContent m <> "`)") $ do
   case mPkmn of
     Nothing -> replyTo m Nothing "usage: `!ha {pokemon}` (e.g. `!ha togepi`)"
     Just pkmn -> do
-      let makeEmbed :: (Text, Text) -> Maybe CreateEmbed
-          makeEmbed (ha', desc') =
-            if desc' == ""
-              then Nothing
-              else
-                Just $
-                  def
-                    { createEmbedTitle = ha',
-                      createEmbedDescription = desc',
-                      createEmbedUrl =
-                        "https://bulbapedia.bulbagarden.net/wiki/"
-                          <> (T.intercalate "_" . T.words $ ha')
-                          <> "_(Ability)",
-                      createEmbedColor = Just DiscordColorLuminousVividPink
-                    }
       -- Try to fetch the Pokemon first. If it can't be found, choose some random moves
       pkmnDetails <- getPokemonIdsAndDetails pkmn
+      atomically $ print pkmnDetails
       case pkmnDetails of
         -- Not a Pokemon
-        Nothing -> do
-          (ha', desc') <- randomAbility
-          atomically $ print ha'
-          restCall_ $
-            DR.CreateMessageDetailed
-              (messageChannelId m)
-              ( def
-                  { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
-                    DR.messageDetailedContent = "I don't think " <> pkmn <> " is a Pokemon, but if it was, it would have the hidden ability " <> ha' <> "!\n(If you were trying to find a real Pokémon, try looking it up at https://apribot.fly.dev/names)",
-                    DR.messageDetailedAllowedMentions = Nothing,
-                    DR.messageDetailedEmbeds = (: []) <$> makeEmbed (ha', desc')
-                  }
-              )
+        NoneFound -> giveRandomHA m pkmn []
+        NoneFoundButSuggesting uniqueNames -> giveRandomHA m pkmn uniqueNames
         -- One species
-        Just (pkmnId, name, form, _) -> do
+        FoundOne (pkmnId, name, form, _) -> do
           let fullName = mkFullName name form
           let piplupNote = "(Note that prior to SV, the Piplup family had Defiant as their HA.)"
               allNotes :: Map Text Text
@@ -442,7 +466,7 @@ respondHA m mPkmn = withContext ("respondHA (`" <> messageContent m <> "`)") $ d
                       { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
                         DR.messageDetailedContent = fullName <> "'s hidden ability is: " <> ha' <> note,
                         DR.messageDetailedAllowedMentions = Nothing,
-                        DR.messageDetailedEmbeds = (: []) <$> makeEmbed (ha', desc')
+                        DR.messageDetailedEmbeds = (: []) <$> makeHAEmbed (ha', desc')
                       }
                   )
 
@@ -454,8 +478,9 @@ respondLegality m mPkmn = withContext ("respondLegality (`" <> messageContent m 
       -- Try to fetch the Pokemon first.
       pkmnDetails <- getPokemonIdsAndDetails pkmn
       case pkmnDetails of
-        Nothing -> replyTo m Nothing $ "No Pokémon with name '" <> pkmn <> "' found.\n(If you're having trouble finding a Pokémon, try looking it up at https://apribot.fly.dev/names)"
-        Just (pkmnId, pkmnName, pkmnForm, _) -> do
+        NoneFound -> replyTo m Nothing $ "No Pokémon with name '" <> pkmn <> "' found." <> didYouMean []
+        NoneFoundButSuggesting uniqueNames -> replyTo m Nothing $ "No Pokémon with name '" <> pkmn <> "' found." <> didYouMean uniqueNames
+        FoundOne (pkmnId, pkmnName, pkmnForm, _) -> do
           unbreedable <- isPokemonUnbreedable pkmnId
           let showLegality :: GenLegality -> Text
               showLegality (GenLegality b d a s sp) =

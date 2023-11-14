@@ -13,6 +13,7 @@ module Pokemon
     Parent (..),
     EggMoveWithParents (..),
     getPokemonIdsAndDetails,
+    GetPokemonIdResult (..),
     SqlException (..),
     getLegality,
     GenLegality (..),
@@ -57,11 +58,20 @@ makeName name form = case form of
 
 -- * General helpers
 
-getPokemonIdsAndDetails :: (MonadIO m) => Text -> App m (Maybe (Int, Text, Maybe Text, Text))
+data GetPokemonIdResult
+  = NoneFound
+  | NoneFoundButSuggesting [Text]
+  | FoundOne (Int, Text, Maybe Text, Text)
+  deriving (Eq, Ord, Show)
+
+getPokemonIdsAndDetails :: (MonadIO m) => Text -> App m GetPokemonIdResult
 getPokemonIdsAndDetails name = do
   let hyphenatedName =
         T.replace "farfetch'd" "farfetchd"
+          . T.replace "sirfetch'd" "sirfetchd"
           . T.replace "mr.-mime" "mr-mime"
+          . T.replace "mime-jr." "mime-jr"
+          . T.replace "mr.-rime" "mr-rime"
           . T.toLower
           . T.intercalate "-"
           . T.words
@@ -72,11 +82,14 @@ getPokemonIdsAndDetails name = do
       [sql|SELECT id, name, form, unique_name
              FROM pokemon
              WHERE unique_name ILIKE ?;|]
-      (Only hyphenatedName)
+      (Only $ hyphenatedName <> "%")
   case results of
-    [] -> pure Nothing
-    [x] -> pure (Just x)
-    _ -> error "getPokemonIdsAndDetails: multiple results returned"
+    [] -> pure NoneFound
+    [x] -> pure $ FoundOne x
+    xs -> case filter (\(_, _, _, uniqueName) -> uniqueName == hyphenatedName) xs of
+      [] -> pure $ NoneFoundButSuggesting ((\(_, _, _, uniqueName) -> uniqueName) <$> xs)
+      [x] -> pure $ FoundOne x
+      _ -> error "getPokemonIdsAndDetails: multiple results returned"
 
 -- * Hidden abilities (Rewritten to use PostgreSQL backend)
 
