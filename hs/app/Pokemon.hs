@@ -20,20 +20,26 @@ module Pokemon
     isPokemonUnbreedable,
     SuggestedNature (..),
     getSuggestedNatures,
+    getSprites,
   )
 where
 
-import Control.Exception (Exception (..), throwIO)
+import Control.Exception (Exception (..), SomeException, throwIO, try)
 import Control.Monad (forM)
 import Control.Monad.IO.Class (MonadIO (..))
+import Data.ByteString (ByteString)
 import Data.List (foldl')
 import Data.Map (Map)
 import qualified Data.Map as M
+import Data.Maybe (catMaybes)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.IO as T
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.SqlQQ
 import GHC.Generics (Generic)
+import Image (hstackPngs, vstackPng)
+import Network.HTTP.Req
 import System.Random (randomRIO)
 import Trans
 
@@ -61,7 +67,7 @@ makeName name form = case form of
 data GetPokemonIdResult
   = NoneFound
   | NoneFoundButSuggesting [Text]
-  | FoundOne (Int, Text, Maybe Text, Text)
+  | FoundOne (Int, Text, Maybe Text, Text, Int)
   deriving (Eq, Ord, Show)
 
 getPokemonIdsAndDetails :: (MonadIO m) => Text -> App m GetPokemonIdResult
@@ -79,15 +85,15 @@ getPokemonIdsAndDetails name = do
   results <- withAppPsqlConn $ \conn ->
     query
       conn
-      [sql|SELECT id, name, form, unique_name
+      [sql|SELECT id, name, form, unique_name, ndex
              FROM pokemon
              WHERE unique_name ILIKE ?;|]
       (Only $ hyphenatedName <> "%")
   case results of
     [] -> pure NoneFound
     [x] -> pure $ FoundOne x
-    xs -> case filter (\(_, _, _, uniqueName) -> uniqueName == hyphenatedName) xs of
-      [] -> pure $ NoneFoundButSuggesting ((\(_, _, _, uniqueName) -> uniqueName) <$> xs)
+    xs -> case filter (\(_, _, _, uniqueName, _) -> uniqueName == hyphenatedName) xs of
+      [] -> pure $ NoneFoundButSuggesting ((\(_, _, _, uniqueName, _) -> uniqueName) <$> xs)
       [x] -> pure $ FoundOne x
       _ -> error "getPokemonIdsAndDetails: multiple results returned"
 
@@ -478,3 +484,43 @@ getSuggestedNatures pkmnId = do
     [] -> pure Nothing
     [(p, js, jb, j7)] -> pure $ Just $ SuggestedNature p js jb j7
     _ -> error "getNatures: got more than one set of suggested natures"
+
+-- * Sprites
+
+getSpriteUrls :: (MonadIO m) => Int -> App m [Text]
+getSpriteUrls pkmnNdex = do
+  -- This file contains a list of all the filenames in the shiny folder of the
+  -- dex_formname_female branch of penelopeysm/RareballSpreadsheet. We use the
+  -- shiny folder because the list of files there is a strict subset of the
+  -- files in the non-shiny ('original') folder.
+  cts <- liftIO $ T.readFile "static/sprite-filenames.txt"
+  let pkmnIdT = T.pack $ show pkmnNdex
+  let allFileNames = T.lines cts
+  pure $ filter (\fname -> fname == pkmnIdT <> ".png" || (pkmnIdT <> "_") `T.isPrefixOf` fname) allFileNames
+
+getOneSprite :: (MonadIO m) => Bool -> Text -> App m (Maybe ByteString)
+getOneSprite shiny fname = do
+  let dir = if shiny then "shiny" else "original"
+  let url = https "raw.githubusercontent.com" /: "penelopeysm" /: "RareballSpreadsheet" /: "dex_formname_female" /: dir /: fname
+  (eitherBs :: Either SomeException BsResponse) <-
+    liftIO $
+      try $
+        runReq defaultHttpConfig $
+          req GET url NoReqBody bsResponse mempty
+  case eitherBs of
+    Left err -> atomically (print err) >> pure Nothing
+    Right bs -> pure $ Just (responseBody bs)
+
+generateCombinedSprites :: (MonadIO m) => [Text] -> App m (Maybe ByteString)
+generateCombinedSprites fnames =
+  case fnames of
+    [] -> pure Nothing
+    _ -> do
+      nonshinySprites <- catMaybes <$> mapM (getOneSprite False) fnames
+      shinySprites <- catMaybes <$> mapM (getOneSprite True) fnames
+      pure $ case zipWith vstackPng nonshinySprites shinySprites of
+        [] -> Nothing
+        xs -> Just $ hstackPngs xs
+
+getSprites :: (MonadIO m) => Int -> App m (Maybe ByteString)
+getSprites pkmnNdex = getSpriteUrls pkmnNdex >>= generateCombinedSprites

@@ -70,6 +70,7 @@ executable apribot
     other-modules:    Config,
                       Database,
                       DiscordBot,
+                      Image,
                       Parser,
                       Paths_apribot,
                       Pokemon,
@@ -88,6 +89,7 @@ executable apribot
                       cookie,
                       discord-haskell,
                       http-types,
+                      JuicyPixels,
                       megaparsec,
                       mtl,
                       optparse-applicative,
@@ -101,6 +103,7 @@ executable apribot
                       time,
                       transformers,
                       wcwidth,
+
 
     -- Directories containing source files.
     hs-source-dirs:   app

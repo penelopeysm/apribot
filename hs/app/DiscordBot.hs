@@ -16,6 +16,7 @@ import Control.Concurrent (forkIO)
 import Control.Concurrent.Chan (readChan, writeChan)
 import Control.Monad (forM, forM_)
 import Control.Monad.IO.Class (MonadIO (..))
+import Data.ByteString (ByteString)
 import Data.Char.WCWidth (wcwidth)
 import Data.List (nub, sortOn)
 import Data.Map.Strict (Map)
@@ -122,6 +123,7 @@ eventHandler e = withContext "eventHandler" $ do
             Just (EMParents game pkmnName) -> respondEM True m game pkmnName
             Just (Nature pkmnName) -> respondNature m pkmnName
             Just (Legality pkmnName) -> respondLegality m pkmnName
+            Just (Sprite pkmnName) -> respondSprite m pkmnName
     -- Ignore other events (for now)
     _ -> pure ()
 
@@ -254,7 +256,7 @@ respondNature m mPkmn = withContext ("respondNature (`" <> messageContent m <> "
         NoneFoundButSuggesting uniqueNames ->
           replyTo m Nothing $
             "No Pokémon with name '" <> pkmn <> "' found." <> didYouMean uniqueNames
-        FoundOne (pkmnId, pkmnName, pkmnForm, _) -> do
+        FoundOne (pkmnId, pkmnName, pkmnForm, _, _) -> do
           let fullName = mkFullName pkmnName pkmnForm
           suggestedNatures <- getSuggestedNatures pkmnId
           liftIO $ T.putStrLn "hi2"
@@ -317,7 +319,7 @@ respondEM withParents m mGame mPkmn = withContext ("respondEM (`" <> messageCont
         NoneFound -> giveRandomEMs m pkmn []
         NoneFoundButSuggesting uniqueNames -> giveRandomEMs m pkmn uniqueNames
         -- One exact match found. Calculate egg moves
-        FoundOne (id', name, form, _) -> do
+        FoundOne (id', name, form, _, _) -> do
           let fullName = mkFullName name form
           if withParents
             then do
@@ -441,7 +443,7 @@ respondHA m mPkmn = withContext ("respondHA (`" <> messageContent m <> "`)") $ d
         NoneFound -> giveRandomHA m pkmn []
         NoneFoundButSuggesting uniqueNames -> giveRandomHA m pkmn uniqueNames
         -- One species
-        FoundOne (pkmnId, name, form, _) -> do
+        FoundOne (pkmnId, name, form, _, _) -> do
           let fullName = mkFullName name form
           let piplupNote = "(Note that prior to SV, the Piplup family had Defiant as their HA.)"
               allNotes :: Map Text Text
@@ -480,7 +482,7 @@ respondLegality m mPkmn = withContext ("respondLegality (`" <> messageContent m 
       case pkmnDetails of
         NoneFound -> replyTo m Nothing $ "No Pokémon with name '" <> pkmn <> "' found." <> didYouMean []
         NoneFoundButSuggesting uniqueNames -> replyTo m Nothing $ "No Pokémon with name '" <> pkmn <> "' found." <> didYouMean uniqueNames
-        FoundOne (pkmnId, pkmnName, pkmnForm, _) -> do
+        FoundOne (pkmnId, pkmnName, pkmnForm, _, _) -> do
           unbreedable <- isPokemonUnbreedable pkmnId
           let showLegality :: GenLegality -> Text
               showLegality (GenLegality b d a s sp) =
@@ -519,6 +521,23 @@ respondLegality m mPkmn = withContext ("respondLegality (`" <> messageContent m 
                         (M.assocs legalities)
                     )
           replyTo m Nothing message
+
+respondSprite :: Message -> Maybe Text -> App DiscordHandler ()
+respondSprite m mPkmn = withContext ("respondSprite (`" <> messageContent m <> "`)") $ do
+  case mPkmn of
+    Nothing -> replyTo m Nothing "usage: `!sprite {pokemon}` (e.g. `!sprite togepi`)"
+    Just pkmn -> do
+      -- Try to fetch the Pokemon first.
+      pkmnDetails <- getPokemonIdsAndDetails pkmn
+      case pkmnDetails of
+        NoneFound -> replyTo m Nothing $ "No Pokémon with name '" <> pkmn <> "' found." <> didYouMean []
+        NoneFoundButSuggesting uniqueNames -> replyTo m Nothing $ "No Pokémon with name '" <> pkmn <> "' found." <> didYouMean uniqueNames
+        FoundOne (_, pkmnName, pkmnForm, _, pkmnNdex) -> do
+          maybeSprite <- getSprites pkmnNdex
+          case maybeSprite of
+            Nothing -> replyTo m Nothing $ "No sprites found for " <> mkFullName pkmnName pkmnForm <> "."
+            Just sprite -> replyWithImage m ("Sprites for " <> mkFullName pkmnName pkmnForm <> " (or any form with the same Dex number):") sprite
+
 
 respondPotluckVotes :: Message -> App DiscordHandler ()
 respondPotluckVotes m = withContext "respondPotluckVotes" $ do
@@ -781,6 +800,8 @@ respondHelp m = withContext "respondHelp" $ do
         "  Show ball legality for a Pokémon across all available games.",
         "- `!nature {pokemon}`",
         "  Show suggested natures for a Pokémon (collated from a couple of spreadsheets).",
+        "- `!sprite {pokemon}`",
+        "  Show regular and shiny sprites for a Pokémon.",
         "- `!potluck1`",
         "  Show a summary of the proposals in <#" <> tshow votesChan <> ">.",
         "- `!potluck2`",
@@ -999,6 +1020,19 @@ replyWithFile m msgContents fname fcontents = withContext "replyWithFile" $ do
             DR.messageDetailedContent = msgContents,
             DR.messageDetailedAllowedMentions = Just (mentionOnly []),
             DR.messageDetailedFile = Just (fname, TE.encodeUtf8 fcontents)
+          }
+      )
+
+replyWithImage :: Message -> Text -> ByteString -> App DiscordHandler ()
+replyWithImage m msgContents imgBS = withContext "replyWithImage" $ do
+  restCall_ $
+    DR.CreateMessageDetailed
+      (messageChannelId m)
+      ( def
+          { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
+            DR.messageDetailedContent = msgContents,
+            DR.messageDetailedAllowedMentions = Just (mentionOnly []),
+            DR.messageDetailedEmbeds = Just [def {createEmbedImage = Just (CreateEmbedImageUpload imgBS)}]
           }
       )
 
