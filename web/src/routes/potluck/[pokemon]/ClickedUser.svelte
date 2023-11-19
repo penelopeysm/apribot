@@ -123,6 +123,7 @@
     }
 
     div#popup button {
+        font-family: inherit;
         margin-top: 5px;
         padding: 2px;
         font-size: 1em;
