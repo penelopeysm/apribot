@@ -514,7 +514,8 @@ respondInfo m mPkmn = withContext ("respondInfo (`" <> messageContent m <> "`)")
                 "### Abilities\n"
                   <> abil1Name
                   <> maybe "" (", " <>) abil2Name
-                  <> maybe "*( no HA)*" (\a -> ", **" <> a <> " (HA)**") haName
+                  <> maybe " *(no HA)*" (\a -> ", **" <> a <> " (HA)**") haName
+                   
           -- EMs
           emsUsum <- map emnpName <$> getEmsNoParents USUM (spId sp)
           emsSwsh <- map emnpName <$> getEmsNoParents SwSh (spId sp)
