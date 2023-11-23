@@ -563,7 +563,7 @@ respondInfo m mPkmn = withContext ("respondInfo (`" <> messageContent m <> "`)")
                       T.intercalate
                         "\n"
                         [bsText, abilText, emText, legText, natureText],
-                    createEmbedUrl = "https://pokemondb.net/pokedex/" <> T.toLower (spName sp),
+                    createEmbedUrl = "https://pokemondb.net/pokedex/" <> (T.replace " " "-" . T.toLower $ spName sp),
                     createEmbedColor = Just DiscordColorLuminousVividPink
                   }
           restCall_ $
