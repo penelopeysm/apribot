@@ -486,19 +486,26 @@ respondInfo m mPkmn = withContext ("respondInfo (`" <> messageContent m <> "`)")
       pkmnDetails <- getPokemonIdsAndDetails pkmn
       case pkmnDetails of
         -- Not a Pokemon
-        NoneFound -> giveRandomHA m pkmn []
-        NoneFoundButSuggesting uniqueNames -> giveRandomHA m pkmn uniqueNames
+        NoneFound -> replyTo m Nothing $ "No Pokémon with name '" <> pkmn <> "' found." <> didYouMean []
+        NoneFoundButSuggesting uniqueNames -> replyTo m Nothing $ "No Pokémon with name '" <> pkmn <> "' found." <> didYouMean uniqueNames
         -- One species
         FoundOne sp -> do
           let fullName = mkFullName (spName sp) (spForm sp)
           -- Base stats
-          let bsText = "### Base stats\n"
-                <> "HP " <> tshow (spHp sp) <> " · "
-                <> "Atk " <> tshow (spAtk sp) <> " · "
-                <> "Def " <> tshow (spDef sp) <> " · "
-                <> "SpA " <> tshow (spSpa sp) <> " · "
-                <> "SpD " <> tshow (spSpd sp) <> " · "
-                <> "Spe " <> tshow (spSpe sp)
+          let bsText =
+                "### Base stats\n"
+                  <> "HP "
+                  <> tshow (spHp sp)
+                  <> " · Atk "
+                  <> tshow (spAtk sp)
+                  <> " · Def "
+                  <> tshow (spDef sp)
+                  <> " · SpA "
+                  <> tshow (spSpa sp)
+                  <> " · SpD "
+                  <> tshow (spSpd sp)
+                  <> " · Spe "
+                  <> tshow (spSpe sp)
           -- Abilities
           abil1Name <- getAbilityName (spAbility1Id sp)
           abil2Name <- mapM getAbilityName (spAbility2Id sp)
@@ -507,7 +514,7 @@ respondInfo m mPkmn = withContext ("respondInfo (`" <> messageContent m <> "`)")
                 "### Abilities\n"
                   <> abil1Name
                   <> maybe "" (", " <>) abil2Name
-                  <> maybe "* (no HA)*" (\a -> ", **" <> a <> " (HA)**") haName
+                  <> maybe "*( no HA)*" (\a -> ", **" <> a <> " (HA)**") haName
           -- EMs
           emsUsum <- map emnpName <$> getEmsNoParents USUM (spId sp)
           emsSwsh <- map emnpName <$> getEmsNoParents SwSh (spId sp)
