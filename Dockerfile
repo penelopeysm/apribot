@@ -19,6 +19,7 @@ FROM penelopeysm/apribot:latest
 WORKDIR /hs
 COPY ./hs/app ./app
 COPY ./hs/python ./python
+COPY ./hs/static ./static
 COPY ./hs/apribot.cabal .
 COPY ./hs/cabal.project .
 COPY ./hs/cabal.project.freeze .

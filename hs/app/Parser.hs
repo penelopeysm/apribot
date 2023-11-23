@@ -32,6 +32,7 @@ data DiscordCommand
   | Nature (Maybe Text)
   | Legality (Maybe Text)
   | Sprite (Maybe Text)
+  | Info (Maybe Text)
   deriving (Eq, Show)
 
 help :: Parser DiscordCommand
@@ -92,6 +93,9 @@ emParents = do
 sprite :: Parser DiscordCommand
 sprite = Sprite <$> (lexeme (C.string' "!sprite") *> optional parsePkmnName)
 
+info :: Parser DiscordCommand
+info = Info <$> (lexeme (C.string' "!info") *> optional parsePkmnName)
+
 parser :: Parser DiscordCommand
 parser = do
   cmd <-
@@ -107,7 +111,8 @@ parser = do
           legality,
           emParents, -- Must come before `em`
           em,
-          sprite
+          sprite,
+          info
         ]
   -- Child parsers don't need eof because there's one here
   eof

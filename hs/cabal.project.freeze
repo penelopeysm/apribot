@@ -2,6 +2,8 @@ active-repositories: hackage.haskell.org:merge
 constraints: any.Cabal ==3.6.3.0,
              Cabal -bundled-binary-generic,
              any.HUnit ==1.6.2.0,
+             any.JuicyPixels ==3.3.8,
+             JuicyPixels -mmap,
              any.MonadRandom ==0.6,
              any.OneTuple ==0.4.1.1,
              any.Only ==0.1,

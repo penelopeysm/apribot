@@ -1,10 +1,13 @@
+{-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TypeApplications #-}
 
 module Pokemon
   ( ha,
+    getAbilityName,
     randomAbility,
+    SqlPkmn (..),
     Game (..),
     randomMoves,
     getEmsNoParents,
@@ -64,10 +67,41 @@ makeName name form = case form of
 
 -- * General helpers
 
+type PkmnId = Int
+
+data SqlPkmn = SqlPkmn
+  { spId :: PkmnId,
+    spName :: Text,
+    spForm :: Maybe Text,
+    spUniqueName :: Text,
+    spNdex :: Int,
+    spGalarDex :: Maybe Int, -- Galar
+    spIoaDex :: Maybe Int, -- Isle of Armor
+    spCtDex :: Maybe Int, -- Crown Tundra
+    spPaldeaDex :: Maybe Int, -- Paldea
+    spTmDex :: Maybe Int, -- Teal Mask
+    spType1Id :: Int,
+    spType2Id :: Maybe Int,
+    spHp :: Int,
+    spAtk :: Int,
+    spDef :: Int,
+    spSpa :: Int,
+    spSpd :: Int,
+    spSpe :: Int,
+    spEggGroup1Id :: Int,
+    spEggGroup2Id :: Maybe Int,
+    spGenderRatioId :: Int,
+    spAbility1Id :: Int,
+    spAbility2Id :: Maybe Int,
+    spHiddenAbilityId :: Maybe Int,
+    spEggCycles :: Int
+  }
+  deriving (Eq, Ord, Show, Generic, FromRow)
+
 data GetPokemonIdResult
   = NoneFound
   | NoneFoundButSuggesting [Text]
-  | FoundOne (Int, Text, Maybe Text, Text, Int)
+  | FoundOne SqlPkmn
   deriving (Eq, Ord, Show)
 
 getPokemonIdsAndDetails :: (MonadIO m) => Text -> App m GetPokemonIdResult
@@ -85,19 +119,140 @@ getPokemonIdsAndDetails name = do
   results <- withAppPsqlConn $ \conn ->
     query
       conn
-      [sql|SELECT id, name, form, unique_name, ndex
+      [sql|SELECT id, name, form, unique_name, ndex, galar_dex, ioa_dex, ct_dex, paldea_dex,
+                  tm_dex, type1_id, type2_id, hp, atk, def, spa, spd, spe, eg1_id, eg2_id,
+                  gr_id, ability1_id, ability2_id, ha_id, egg_cycles
              FROM pokemon
              WHERE unique_name ILIKE ?;|]
       (Only $ hyphenatedName <> "%")
   case results of
     [] -> pure NoneFound
     [x] -> pure $ FoundOne x
-    xs -> case filter (\(_, _, _, uniqueName, _) -> uniqueName == hyphenatedName) xs of
-      [] -> pure $ NoneFoundButSuggesting ((\(_, _, _, uniqueName, _) -> uniqueName) <$> xs)
+    xs -> case filter (\ps -> spUniqueName ps == hyphenatedName) xs of
+      [] -> pure $ NoneFoundButSuggesting (spUniqueName <$> xs)
       [x] -> pure $ FoundOne x
       _ -> error "getPokemonIdsAndDetails: multiple results returned"
 
--- * Hidden abilities (Rewritten to use PostgreSQL backend)
+-- | Get the ID of the base form of a given Pokemon.
+_getBaseForm :: (MonadIO m) => PkmnId -> App m PkmnId
+_getBaseForm pkmnId = do
+  baseForm <- withAppPsqlConn $ \conn ->
+    query
+      conn
+      [sql|WITH RECURSIVE cte_base AS (
+        SELECT prevo_id, evo_id, 0 as level FROM evolutions
+        WHERE evo_id = ?
+        UNION
+        SELECT e.prevo_id, e.evo_id, level + 1 FROM evolutions e
+        INNER JOIN cte_base c ON c.prevo_id = e.evo_id
+      )
+      SELECT prevo_id
+      FROM (
+        -- This gets all real prevos
+        SELECT * FROM cte_base
+        -- This adds the current form being searched for to the list
+        UNION SELECT * FROM (VALUES (?, 0, -1)) AS t (prevo_id, evo_id, level)
+        ORDER BY level DESC LIMIT 1
+      ) AS t2;|]
+      (pkmnId, pkmnId)
+  case baseForm of
+    [] -> pure pkmnId -- No prevos.
+    (Only baseFormId : _) -> pure baseFormId -- Found prevo.
+
+-- | Get all parents of a Pokemon recursively. Note that this function should be
+-- called on the base form of an evolution tree.
+_getAllParents :: (MonadIO m) => PkmnId -> App m [PkmnId]
+_getAllParents pkmnId = do
+  evos <- withAppPsqlConn $ \conn ->
+    query
+      conn
+      [sql|WITH RECURSIVE evos AS (
+          SELECT prevo_id, evo_id FROM evolutions
+          WHERE prevo_id = ?
+          UNION
+          SELECT e.prevo_id, e.evo_id FROM evolutions e
+          INNER JOIN evos e2 ON e2.evo_id = e.prevo_id
+        )
+        SELECT evo_id FROM evos;|]
+      (Only pkmnId)
+  pure $ pkmnId : map fromOnly evos
+
+-- | Get all members of an evolution tree. In principle, this could be
+-- implemented as _getBaseForm >=> _getAllParents, but that would require two
+-- database calls. Here we've merged it into one single query. I'm not actually
+-- sure if this is faster, though.
+getAllEvolutionTreeMembers :: (MonadIO m) => PkmnId -> App m [PkmnId]
+getAllEvolutionTreeMembers pkmnId = do
+  ns <- withAppPsqlConn $ \conn ->
+    query
+      conn
+      [sql|
+      WITH RECURSIVE
+      cte_base AS (
+        SELECT prevo_id, evo_id, 0 as level FROM evolutions
+        WHERE evo_id = ?
+        UNION
+        SELECT e.prevo_id, e.evo_id, level + 1 FROM evolutions e
+        INNER JOIN cte_base c ON c.prevo_id = e.evo_id
+      ),
+      base_form_id AS (
+        SELECT prevo_id
+        FROM (SELECT *
+            FROM cte_base
+            UNION SELECT * FROM (VALUES (?, 0, -1)) AS t (prevo_id, evo_id, level)
+            ORDER BY level DESC LIMIT 1)
+        AS t2
+      ),
+      cte_evos AS (
+        SELECT prevo_id, evo_id, 0 as level FROM evolutions
+        WHERE prevo_id = (SELECT prevo_id FROM base_form_id)
+        UNION
+        SELECT e.prevo_id, e.evo_id, level + 1 FROM evolutions e
+        INNER JOIN cte_evos c ON c.evo_id = e.prevo_id
+      )
+      SELECT evo_id FROM cte_evos
+      UNION (SELECT prevo_id FROM base_form_id)
+      ORDER BY evo_id ASC;|]
+      (pkmnId, pkmnId)
+  pure $ map fromOnly ns
+
+-- | Get all Pokemon forms which can be crossbred from a given list of Pokemon.
+getAllCrossbreedableForms :: (MonadIO m) => [PkmnId] -> App m [PkmnId]
+getAllCrossbreedableForms pkmnIds = do
+  ns <- withAppPsqlConn $ \conn -> do
+    query
+      conn
+      [sql|
+      SELECT p.id
+        FROM pokemon as p
+       WHERE (p.ndex IN (SELECT DISTINCT ndex FROM pokemon WHERE id IN ?) AND p.gr_id IN (3, 4, 5, 6, 7))
+          OR p.id IN ?
+      |]
+      (In pkmnIds, In pkmnIds)
+  pure $ map fromOnly ns
+
+-- | Returns whether a Pokemon is unbreedable. This is true iff all members of
+-- the Pokemon's evolution tree belong to unbreedable egg groups.
+isPokemonUnbreedable :: (MonadIO m) => PkmnId -> App m Bool
+isPokemonUnbreedable pkmnId = do
+  evoFamilyIds <- getAllEvolutionTreeMembers pkmnId
+  result <- withAppPsqlConn $ \conn ->
+    query
+      conn
+      [sql|
+      SELECT NOT EXISTS(
+          SELECT * FROM pokemon as p2
+          WHERE p2.id IN ?
+          AND p2.eg1_id NOT IN (13, 15)
+      );
+      |]
+      (Only $ In evoFamilyIds)
+  case result of
+    [Only True] -> pure True
+    [Only False] -> pure False
+    _ -> error "isPokemonUnbreedable: expected exactly one Boolean result"
+
+-- * Hidden abilities
 
 -- | Generate a random ability.
 randomAbility :: (MonadIO m) => App m (Text, Text)
@@ -113,7 +268,18 @@ randomAbility = do
     [(name, flavorText)] -> pure (name, flavorText)
     _ -> sqlError "randomAbility: could not get random ability from database"
 
-ha :: (MonadIO m) => Int -> App m (Maybe (Text, Text))
+getAbilityName :: (MonadIO m) => Int -> App m Text
+getAbilityName abilityId = do
+  result <- withAppPsqlConn $ \conn ->
+    query
+      conn
+      [sql|SELECT name FROM abilities WHERE id = ?;|]
+      (Only abilityId)
+  case result of
+    [Only name] -> pure name
+    _ -> sqlError "getAbilityName: could not get ability name from database"
+
+ha :: (MonadIO m) => PkmnId -> App m (Maybe (Text, Text))
 ha pkmnId = do
   result <- withAppPsqlConn $ \conn ->
     query
@@ -164,7 +330,7 @@ randomMoves = do
              LIMIT ?;|]
       (Only nMoves)
 
-getEmsNoParents :: (MonadIO m) => Game -> Int -> App m [EggMoveNoParents]
+getEmsNoParents :: (MonadIO m) => Game -> PkmnId -> App m [EggMoveNoParents]
 getEmsNoParents game pkmnId = do
   movesAndFlavorTexts :: [(Text, Text)] <-
     withAppPsqlConn $ \conn ->
@@ -179,10 +345,6 @@ getEmsNoParents game pkmnId = do
         (pkmnId, T.pack (show game))
   pure $ map (uncurry EggMoveNoParents) movesAndFlavorTexts
 
--- TODO: Need to fix for genderless & female-only Pokemon, as they can pass
--- their own egg moves down to themselves
--- Suggestion: put an extra column in the Pokemon table that says which family a
--- mon belongs to
 getParentsGen78 :: (MonadIO m) => [Text] -> Maybe Int -> Text -> Game -> App m [Parent]
 getParentsGen78 eggGroups evoFamilyId moveName game = do
   learnParents :: [Parent] <-
@@ -291,7 +453,7 @@ getParentsGen9 moveName game = do
           (moveName, show game)
   pure $ learnParents <> breedParents
 
-getEmsWithParents :: (MonadIO m) => Game -> Int -> App m [EggMoveWithParents]
+getEmsWithParents :: (MonadIO m) => Game -> PkmnId -> App m [EggMoveWithParents]
 getEmsWithParents game pkmnId = do
   movesAndFlavorTexts :: [(Text, Text)] <-
     withAppPsqlConn $ \conn ->
@@ -369,47 +531,26 @@ parseLegalitySql (b1, d1, a1, s1, sp1, b2, d2, a2, s2, sp2) =
     (GenLegality b1 d1 a1 s1 sp1)
     (GenLegality b2 d2 a2 s2 sp2)
 
-getLegality :: (MonadIO m) => Int -> App m (Map Game (Bool, GenLegality))
+getLegality :: (MonadIO m) => PkmnId -> App m (Map Game (Bool, GenLegality))
 getLegality pkmnId = do
   -- Get the legality of all members in the same evolution family, and combine
-  -- them using `legalityOr`. In practice, this accomplishes two things:
-  -- 1. We can search for legality of evolutions.
-  -- 2. We can combine legality of regional variants and other forms, assuming
-  -- that they are crossbreedable. The only exceptions to this, as of SV DLC1,
-  -- are Tauros and Flabebe. This is taken care of in the database by:
-  --    - Not having the different Tauros forms belong to the same evolution
-  --      family. (Their evolution family is NULL)
-  --    - Not listing separate Flabebe forms.
-  evoFamilyId :: Maybe Int <- do
-    sqlEvoFamilyId <- withAppPsqlConn $ \conn ->
-      query
-        conn
-        [sql|SELECT evolution_family_id FROM pokemon WHERE id = ?;|]
-        (Only pkmnId)
-    case sqlEvoFamilyId of
-      [Only i] -> pure i
-      _ -> error "getLegality: expected exactly one evolution family id"
+  -- them using `legalityOr`
+  evoTreeMembers <- getAllEvolutionTreeMembers pkmnId
+  atomically $ print evoTreeMembers
+  crossbreedableEvoTreeMembers <- getAllCrossbreedableForms evoTreeMembers
+  atomically $ print crossbreedableEvoTreeMembers
   legalitySql :: [Legality] <- withAppPsqlConn $ \conn ->
     map parseLegalitySql
-      <$> case evoFamilyId of
-        Just efId ->
-          query
-            conn
-            [sql|SELECT l.bank_beast, l.bank_dream, l.bank_apri, l.bank_safari, l.bank_sport,
-                            l.home_beast, l.home_dream, l.home_apri, l.home_safari, l.home_sport
-                            FROM legality as l
-                            LEFT JOIN pokemon as p ON l.pokemon_id = p.id
-                            WHERE p.evolution_family_id = ?;|]
-            (Only efId)
-        Nothing ->
-          query
-            conn
-            [sql|SELECT l.bank_beast, l.bank_dream, l.bank_apri, l.bank_safari, l.bank_sport,
-                            l.home_beast, l.home_dream, l.home_apri, l.home_safari, l.home_sport
-                            FROM legality as l
-                            LEFT JOIN pokemon as p ON l.pokemon_id = p.id
-                            WHERE p.id = ?;|]
-            (Only pkmnId)
+      <$> query
+        conn
+        [sql|
+        SELECT l.bank_beast, l.bank_dream, l.bank_apri, l.bank_safari, l.bank_sport,
+               l.home_beast, l.home_dream, l.home_apri, l.home_safari, l.home_sport
+        FROM legality as l
+        LEFT JOIN pokemon as p ON l.pokemon_id = p.id
+        WHERE p.id IN ?;
+        |]
+        (Only $ In crossbreedableEvoTreeMembers)
   let baseLegality = foldl' legalityOr legalityAllFalse legalitySql
 
   -- `baseLegality` tells us the legality of a Pokemon in Bank and HOME.
@@ -435,33 +576,11 @@ getLegality pkmnId = do
     M.fromList
       [ (USUM, (USUM `elem` gamesAvailableIn, bank baseLegality `genLegalityAndBool` (USUM `elem` gamesAvailableIn))),
         (SwSh, (SwSh `elem` gamesAvailableIn, home baseLegality `genLegalityAndBool` (SwSh `elem` gamesAvailableIn))),
-        if pkmnId == 405 -- Spinda
+        if pkmnId == 371 -- Spinda
           then (BDSP, (True, GenLegality False False True False False))
           else (BDSP, (BDSP `elem` gamesAvailableIn, home baseLegality `genLegalityAndBool` (BDSP `elem` gamesAvailableIn))),
         (SV, (SV `elem` gamesAvailableIn, home baseLegality `genLegalityAndBool` (SV `elem` gamesAvailableIn)))
       ]
-
-isPokemonUnbreedable :: (MonadIO m) => Int -> App m Bool
-isPokemonUnbreedable pkmnId = do
-  result <- withAppPsqlConn $ \conn ->
-    query
-      conn
-      [sql|SELECT EXISTS(
-           SELECT *
-            FROM pokemon as p
-           WHERE p.eg1_id IN (13, 15)   -- Ditto / Undiscovered
-                 AND -- Doesn't evolve
-                   (p.evolution_family_id IS NULL     -- Doesn't evolve
-                     -- All members of evolution family are undiscovered
-                     OR NOT EXISTS(SELECT * FROM pokemon as p2
-                                    WHERE p.evolution_family_id = p2.evolution_family_id
-                                      AND p2.eg1_id NOT IN (13, 15)))
-                 AND p.id = ?);|]
-      (Only pkmnId)
-  case result of
-    [Only True] -> pure True
-    [Only False] -> pure False
-    _ -> error "isPokemonUnbreedable: expected exactly one Boolean result"
 
 -- * Natures
 
@@ -472,7 +591,7 @@ data SuggestedNature = SuggestedNature
     jemmaG7 :: Maybe Text
   }
 
-getSuggestedNatures :: (MonadIO m) => Int -> App m (Maybe SuggestedNature)
+getSuggestedNatures :: (MonadIO m) => PkmnId -> App m (Maybe SuggestedNature)
 getSuggestedNatures pkmnId = do
   suggestedNatures <- withAppPsqlConn $ \conn ->
     query

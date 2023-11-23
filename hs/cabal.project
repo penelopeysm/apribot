@@ -8,4 +8,4 @@ source-repository-package
 source-repository-package
     type: git
     location: https://github.com/penelopeysm/discord-haskell
-    tag: c60da0996686a718ccd3a5337073525724f56284
+    tag: d734732e42965916f2bd62886a753e05c410e6ee

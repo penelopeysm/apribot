@@ -18,7 +18,7 @@ import Control.Monad (forM, forM_)
 import Control.Monad.IO.Class (MonadIO (..))
 import Data.ByteString (ByteString)
 import Data.Char.WCWidth (wcwidth)
-import Data.List (nub, sortOn)
+import Data.List (nub, sort, sortOn)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
 import Data.Maybe (catMaybes, fromMaybe, isNothing, mapMaybe)
@@ -95,6 +95,7 @@ eventHandler e = withContext "eventHandler" $ do
   -- Print if it's not a GuildCreate
   case e of
     GuildCreate {} -> pure ()
+    MessageCreate m -> atomically $ T.putStrLn $ "MessageCreate by " <> userName (messageAuthor m) <> ": " <> messageContent m
     _ -> atomically $ print e
   case e of
     GuildCreate {} -> pure ()
@@ -118,6 +119,7 @@ eventHandler e = withContext "eventHandler" $ do
             Just CloseThread -> closeThread m
             Just PotluckVotes -> respondPotluckVotes m
             Just PotluckSignup -> respondPotluckSignup m
+            Just (Info pkmnName) -> respondInfo m pkmnName
             Just (HA pkmnName) -> respondHA m pkmnName
             Just (EM game pkmnName) -> respondEM False m game pkmnName
             Just (EMParents game pkmnName) -> respondEM True m game pkmnName
@@ -256,10 +258,12 @@ respondNature m mPkmn = withContext ("respondNature (`" <> messageContent m <> "
         NoneFoundButSuggesting uniqueNames ->
           replyTo m Nothing $
             "No Pokémon with name '" <> pkmn <> "' found." <> didYouMean uniqueNames
-        FoundOne (pkmnId, pkmnName, pkmnForm, _, _) -> do
+        FoundOne sp -> do
+          let pkmnId = spId sp
+              pkmnName = spName sp
+              pkmnForm = spForm sp
           let fullName = mkFullName pkmnName pkmnForm
           suggestedNatures <- getSuggestedNatures pkmnId
-          liftIO $ T.putStrLn "hi2"
           case suggestedNatures of
             Nothing -> replyTo m Nothing $ "No suggested natures found for " <> fullName <> "."
             Just sn -> do
@@ -319,8 +323,9 @@ respondEM withParents m mGame mPkmn = withContext ("respondEM (`" <> messageCont
         NoneFound -> giveRandomEMs m pkmn []
         NoneFoundButSuggesting uniqueNames -> giveRandomEMs m pkmn uniqueNames
         -- One exact match found. Calculate egg moves
-        FoundOne (id', name, form, _, _) -> do
-          let fullName = mkFullName name form
+        FoundOne sp -> do
+          let id' = spId sp
+          let fullName = mkFullName (spName sp) (spForm sp)
           if withParents
             then do
               ems <- getEmsWithParents game id'
@@ -340,7 +345,7 @@ respondEM withParents m mGame mPkmn = withContext ("respondEM (`" <> messageCont
                   let emText = T.pack $ printf "%s egg moves in %s: %s" fullName (show game) (T.intercalate ", " (map emwpName ems'))
                   let embeds = map makeEmEmbedWithParents ems'
                   let postSubsequentEms remainingEmbeds =
-                        case splitAt 4 remainingEmbeds of
+                        case splitAt 3 remainingEmbeds of
                           ([], []) -> pure ()
                           (xs, ys) -> do
                             restCall_ $
@@ -354,7 +359,7 @@ respondEM withParents m mGame mPkmn = withContext ("respondEM (`" <> messageCont
                                     }
                                 )
                             postSubsequentEms ys
-                  case splitAt 4 embeds of
+                  case splitAt 3 embeds of
                     (xs, ys) -> do
                       restCall_ $
                         DR.CreateMessageDetailed
@@ -437,14 +442,14 @@ respondHA m mPkmn = withContext ("respondHA (`" <> messageContent m <> "`)") $ d
     Just pkmn -> do
       -- Try to fetch the Pokemon first. If it can't be found, choose some random moves
       pkmnDetails <- getPokemonIdsAndDetails pkmn
-      atomically $ print pkmnDetails
       case pkmnDetails of
         -- Not a Pokemon
         NoneFound -> giveRandomHA m pkmn []
         NoneFoundButSuggesting uniqueNames -> giveRandomHA m pkmn uniqueNames
         -- One species
-        FoundOne (pkmnId, name, form, _, _) -> do
-          let fullName = mkFullName name form
+        FoundOne sp -> do
+          let pkmnId = spId sp
+          let fullName = mkFullName (spName sp) (spForm sp)
           let piplupNote = "(Note that prior to SV, the Piplup family had Defiant as their HA.)"
               allNotes :: Map Text Text
               allNotes =
@@ -454,7 +459,7 @@ respondHA m mPkmn = withContext ("respondHA (`" <> messageContent m <> "`)") $ d
                     ("Empoleon", piplupNote),
                     ("Ferroseed", "(Note that Ferrothorn has Anticipation as its HA.)")
                   ]
-              note = case M.lookup name allNotes of Just d -> "\n" <> d; Nothing -> ""
+              note = case M.lookup (spName sp) allNotes of Just d -> "\n" <> d; Nothing -> ""
           haAndFlavorText <- ha pkmnId
           case haAndFlavorText of
             -- No HA
@@ -472,6 +477,131 @@ respondHA m mPkmn = withContext ("respondHA (`" <> messageContent m <> "`)") $ d
                       }
                   )
 
+respondInfo :: Message -> Maybe Text -> App DiscordHandler ()
+respondInfo m mPkmn = withContext ("respondInfo (`" <> messageContent m <> "`)") $ do
+  case mPkmn of
+    Nothing -> replyTo m Nothing "usage: `!info {pokemon}` (e.g. `!info togepi`)"
+    Just pkmn -> do
+      -- Try to fetch the Pokemon first. If it can't be found, choose some random moves
+      pkmnDetails <- getPokemonIdsAndDetails pkmn
+      case pkmnDetails of
+        -- Not a Pokemon
+        NoneFound -> giveRandomHA m pkmn []
+        NoneFoundButSuggesting uniqueNames -> giveRandomHA m pkmn uniqueNames
+        -- One species
+        FoundOne sp -> do
+          let fullName = mkFullName (spName sp) (spForm sp)
+          -- Base stats
+          let bsText = "### Base stats\n"
+                <> "HP " <> tshow (spHp sp) <> " · "
+                <> "Atk " <> tshow (spAtk sp) <> " · "
+                <> "Def " <> tshow (spDef sp) <> " · "
+                <> "SpA " <> tshow (spSpa sp) <> " · "
+                <> "SpD " <> tshow (spSpd sp) <> " · "
+                <> "Spe " <> tshow (spSpe sp)
+          -- Abilities
+          abil1Name <- getAbilityName (spAbility1Id sp)
+          abil2Name <- mapM getAbilityName (spAbility2Id sp)
+          haName <- mapM getAbilityName (spHiddenAbilityId sp)
+          let abilText =
+                "### Abilities\n"
+                  <> abil1Name
+                  <> maybe "" (", " <>) abil2Name
+                  <> maybe "* (no HA)*" (\a -> ", **" <> a <> " (HA)**") haName
+          -- EMs
+          emsUsum <- map emnpName <$> getEmsNoParents USUM (spId sp)
+          emsSwsh <- map emnpName <$> getEmsNoParents SwSh (spId sp)
+          emsBdsp <- map emnpName <$> getEmsNoParents BDSP (spId sp)
+          emsSv <- map emnpName <$> getEmsNoParents SV (spId sp)
+          let makeEmTextIn (ems, game) = "**" <> game <> "** " <> T.intercalate ", " (sort ems)
+          let emText =
+                "### Egg moves\n"
+                  <> case filter
+                    (not . null . fst)
+                    [ (emsUsum, "USUM"),
+                      (emsSwsh, "SwSh"),
+                      (emsBdsp, "BDSP"),
+                      (emsSv, "SV")
+                    ] of
+                    [] -> "None."
+                    emsAndGames -> T.intercalate "\n" (map makeEmTextIn emsAndGames)
+          -- Legality
+          legalities <- getLegality (spId sp)
+          unbreedable <- isPokemonUnbreedable (spId sp)
+          let legText = "### Legality\n" <> mkLegalityText legalities unbreedable
+          -- Natures
+          suggestedNatures <- getSuggestedNatures (spId sp)
+          let natureText =
+                "### Suggested natures\n" <> case suggestedNatures of
+                  Nothing -> "None."
+                  Just sn ->
+                    do
+                      case penny sn of
+                        Nothing -> ""
+                        Just n -> "\n**Penny** " <> n
+                      <> case jemmaSwSh sn of
+                        Nothing -> ""
+                        Just n -> "\n**Jemma SwSh** " <> n
+                      <> case jemmaBDSP sn of
+                        Nothing -> ""
+                        Just n -> "\n**Jemma BDSP** " <> n
+                      <> case jemmaG7 sn of
+                        Nothing -> ""
+                        Just n -> "\n**Jemma G7** " <> n
+          -- Put it all together
+          let embed =
+                def
+                  { createEmbedTitle = fullName <> " (#" <> tshow (spNdex sp) <> ")",
+                    createEmbedDescription =
+                      T.intercalate
+                        "\n"
+                        [bsText, abilText, emText, legText, natureText],
+                    createEmbedUrl = "https://pokemondb.net/pokedex/" <> T.toLower (spName sp),
+                    createEmbedColor = Just DiscordColorLuminousVividPink
+                  }
+          restCall_ $
+            DR.CreateMessageDetailed
+              (messageChannelId m)
+              ( def
+                  { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
+                    DR.messageDetailedContent = "",
+                    DR.messageDetailedAllowedMentions = Nothing,
+                    DR.messageDetailedEmbeds = Just [embed]
+                  }
+              )
+
+mkLegalityText :: Map Game (Bool, GenLegality) -> Bool -> Text
+mkLegalityText legalities unbreedable =
+  let showLegality (GenLegality b d a s sp) =
+        T.concat
+          [ if b then "<:beastball:1132050100017959033>" else "",
+            if d then "<:dreamball:1132050106200375416>" else "",
+            if a then "<:fastball:1132050109073465414><:friendball:1132050111598436414><:heavyball:1132050112965775541><:levelball:1132050114765148260><:loveball:1132050117323661382><:lureball:1132050118481285220><:moonball:1132050120251281530>" else "",
+            if s then "<:safariball:1132052412501344266>" else "",
+            if sp then "<:sportball:1132050124823068752>" else ""
+          ]
+   in T.intercalate
+        "\n"
+        ( map
+            ( \(game, (availableInGame, legality)) ->
+                ( if availableInGame
+                    then ":white_check_mark:"
+                    else ":x:"
+                )
+                  <> " **"
+                  <> tshow game
+                  <> "** "
+                  <> case (availableInGame, unbreedable) of
+                    (False, _) -> "Not available in game"
+                    (True, True) -> "Cannot be bred"
+                    (True, False) ->
+                      if legality == GenLegality False False False False False
+                        then "No rare ball combos available"
+                        else showLegality legality
+            )
+            (M.assocs legalities)
+        )
+
 respondLegality :: Message -> Maybe Text -> App DiscordHandler ()
 respondLegality m mPkmn = withContext ("respondLegality (`" <> messageContent m <> "`)") $ do
   case mPkmn of
@@ -482,44 +612,15 @@ respondLegality m mPkmn = withContext ("respondLegality (`" <> messageContent m 
       case pkmnDetails of
         NoneFound -> replyTo m Nothing $ "No Pokémon with name '" <> pkmn <> "' found." <> didYouMean []
         NoneFoundButSuggesting uniqueNames -> replyTo m Nothing $ "No Pokémon with name '" <> pkmn <> "' found." <> didYouMean uniqueNames
-        FoundOne (pkmnId, pkmnName, pkmnForm, _, _) -> do
-          unbreedable <- isPokemonUnbreedable pkmnId
-          let showLegality :: GenLegality -> Text
-              showLegality (GenLegality b d a s sp) =
-                T.concat
-                  [ if b then "<:beastball:1132050100017959033>" else "",
-                    if d then "<:dreamball:1132050106200375416>" else "",
-                    if a then "<:fastball:1132050109073465414><:friendball:1132050111598436414><:heavyball:1132050112965775541><:levelball:1132050114765148260><:loveball:1132050117323661382><:lureball:1132050118481285220><:moonball:1132050120251281530>" else "",
-                    if s then "<:safariball:1132052412501344266>" else "",
-                    if sp then "<:sportball:1132050124823068752>" else ""
-                  ]
-          let fullName = mkFullName pkmnName pkmnForm
-          legalities <- getLegality pkmnId
+        FoundOne spkmn -> do
+          unbreedable <- isPokemonUnbreedable (spId spkmn)
+          let fullName = mkFullName (spName spkmn) (spForm spkmn)
+          legalities <- getLegality (spId spkmn)
           let message :: Text
               message =
                 fullName
                   <> " legality:\n"
-                  <> T.intercalate
-                    "\n"
-                    ( map
-                        ( \(game, (availableInGame, legality)) ->
-                            ( if availableInGame
-                                then ":white_check_mark:"
-                                else ":x:"
-                            )
-                              <> " **"
-                              <> tshow game
-                              <> "** "
-                              <> case (availableInGame, unbreedable) of
-                                (False, _) -> "Not available in game"
-                                (True, True) -> "Cannot be bred"
-                                (True, False) ->
-                                  if legality == GenLegality False False False False False
-                                    then "No rare ball combos available"
-                                    else showLegality legality
-                        )
-                        (M.assocs legalities)
-                    )
+                  <> mkLegalityText legalities unbreedable
           replyTo m Nothing message
 
 respondSprite :: Message -> Maybe Text -> App DiscordHandler ()
@@ -532,12 +633,13 @@ respondSprite m mPkmn = withContext ("respondSprite (`" <> messageContent m <> "
       case pkmnDetails of
         NoneFound -> replyTo m Nothing $ "No Pokémon with name '" <> pkmn <> "' found." <> didYouMean []
         NoneFoundButSuggesting uniqueNames -> replyTo m Nothing $ "No Pokémon with name '" <> pkmn <> "' found." <> didYouMean uniqueNames
-        FoundOne (_, pkmnName, pkmnForm, _, pkmnNdex) -> do
-          maybeSprite <- getSprites pkmnNdex
+        FoundOne spkmn -> do
+          let pkmnName = spName spkmn
+              pkmnForm = spForm spkmn
+          maybeSprite <- getSprites (spNdex spkmn)
           case maybeSprite of
             Nothing -> replyTo m Nothing $ "No sprites found for " <> mkFullName pkmnName pkmnForm <> "."
             Just sprite -> replyWithImage m ("Sprites for " <> mkFullName pkmnName pkmnForm <> " (or any form with the same Dex number):") sprite
-
 
 respondPotluckVotes :: Message -> App DiscordHandler ()
 respondPotluckVotes m = withContext "respondPotluckVotes" $ do
@@ -679,7 +781,6 @@ makeThread m = withContext "makeThread" $ do
                   tellError err2
                   replyTo m Nothing "Could not get info about the first message in the channel."
                 Right [firstMsg] -> do
-                  atomically $ print (messageAuthor firstMsg)
                   when (authorId1 == userId (messageAuthor firstMsg)) $ do
                     when (authorId1 == authorId2) $ replyTo m Nothing "You can't trade with yourself!"
                     when (authorId1 /= authorId2) $ do
@@ -693,7 +794,6 @@ makeThread m = withContext "makeThread" $ do
                             Nothing -> replyTo m Nothing "You can only use this command within a forum thread."
                             Just tname -> do
                               let threadName = truncateThreadTitle $ author1 <> " & " <> author2 <> " | " <> tname
-                              atomically $ T.putStrLn $ "Creating thread for " <> author1 <> " and " <> author2
                               eitherNewThread <-
                                 lift $
                                   restCall $
@@ -753,7 +853,6 @@ closeThread m = withContext "closeThread" $ do
       tellError err
       replyTo m Nothing "Could not get info about the channel you replied in."
     Right chn@(ChannelPublicThread {}) -> do
-      atomically $ print chn
       eitherFirstMsg <- lift $ restCall $ DR.GetChannelMessages channelId (1, DR.AfterMessage (mkId 0))
       case eitherFirstMsg of
         Right [firstMsg] -> do
@@ -786,10 +885,13 @@ respondHelp m = withContext "respondHelp" $ do
   votesChan <- asks cfgPotluckVotesChannelId
   signupChan <- asks cfgPotluckSignupChannelId
   replyTo m Nothing $
-    T.unlines
+    T.intercalate
+      "\n"
       [ "**General commands**",
         "- `!help`",
         "  Show this message.",
+        "- `!info {pokemon}`",
+        "  Show a comprehensive overview of a Pokémon, including stats, moves, and abilities.",
         "- `!ha {pokemon}`",
         "  Show the hidden ability of a Pokémon",
         "- `!em {game} {pokemon}`",
