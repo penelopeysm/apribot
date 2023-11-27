@@ -83,6 +83,7 @@ executable apribot
     -- Other library packages from which modules are imported.
     build-depends:    base,
                       aeson,
+                      apripsql,
                       async,
                       bytestring,
                       containers,

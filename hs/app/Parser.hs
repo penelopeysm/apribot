@@ -7,7 +7,7 @@ where
 import Control.Monad (void)
 import Data.Text (Text)
 import Data.Void
-import Pokemon (Game (..))
+import Setup.Game (Game (..)) -- from apripsql
 import Text.Megaparsec
 import qualified Text.Megaparsec.Char as C
 import qualified Text.Megaparsec.Char.Lexer as L

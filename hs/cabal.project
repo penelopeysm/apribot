@@ -9,3 +9,8 @@ source-repository-package
     type: git
     location: https://github.com/penelopeysm/discord-haskell
     tag: d734732e42965916f2bd62886a753e05c410e6ee
+
+source-repository-package
+    type: git
+    location: https://github.com/penelopeysm/apripsql
+    tag: 82f0278f3a0ff5198703d0852ff4694524ac37d5
