@@ -322,6 +322,7 @@ respondEM withParents m mGame mPkmn = withContext ("respondEM (`" <> messageCont
     (_, Nothing) -> replyWithUsage
     -- Otherwise, try to fetch the Pokemon
     (Just game, Just pkmn) -> do
+      when (game /= SV && withParents) $ replyTo m Nothing "EM parents in gen7/8 aren't fixed yet. I'm working on it, but I've been very busy lately, sorry. - Penny"
       -- Try to fetch the Pokemon first. If it can't be found, choose some random moves
       pkmnDetails <- withAppPsqlConn $ Q.getPokemon pkmn
       case pkmnDetails of
