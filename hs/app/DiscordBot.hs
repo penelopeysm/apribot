@@ -138,11 +138,14 @@ eventHandler e = withContext "eventHandler" $ do
 -- a message to Discord.
 notifyDiscord :: (MonadIO m) => NotifyEvent -> App m ()
 notifyDiscord e = do
-  -- If e is a Log event, prefix it with the current execution context
+  -- If e is a Log or Debug event, prefix it with the current execution context
   e' <- case e of
     Log msg -> do
       ctx <- asks cfgContext
       pure $ Log $ ctx <> ": " <> msg
+    Debug msg -> do
+      ctx <- asks cfgContext
+      pure $ Debug $ "[debug] " <> ctx <> ": " <> msg
     _ -> pure e
   chan <- asks cfgChan
   liftIO $ writeChan chan e'
@@ -154,6 +157,11 @@ logToDiscord :: Text -> App DiscordHandler ()
 logToDiscord msg = do
   cfg <- ask
   restCall_ $ DR.CreateMessage (cfgLogChannelId cfg) msg
+
+debugToDiscord :: Text -> App DiscordHandler ()
+debugToDiscord msg = do
+  cfg <- ask
+  restCall_ $ DR.CreateMessage (cfgDebugChannelId cfg) msg
 
 -- | Loop which waits for a post to be added to the MVar. When one is added (via
 -- the 'notifyDiscord' function), this posts it to the Discord channel.
@@ -212,6 +220,7 @@ notifyLoop = withContext "notifyLoop" $ do
       NotifyPost post -> notifyPost post
       UnnotifyPostById pid -> unnotifyPost pid
       Log t -> logToDiscord t
+      Debug t -> debugToDiscord t
 
 createEmEmbedDescription :: Q.EggMoveParents -> Text
 createEmEmbedDescription em' =

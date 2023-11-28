@@ -21,6 +21,7 @@ data NotifyEvent
   | NotifyPostById (ID Post)
   | UnnotifyPostById (ID Post)
   | Log Text
+  | Debug Text
   deriving (Show)
 
 data Config = Config
@@ -103,6 +104,7 @@ getConfig = do
       cfgPotluckVotesChannelId = mkId 1144082505704681555
       cfgPotluckSignupChannelId = mkId 1144082624613204029
       cfgLogChannelId = mkId 1132000877415247903
+      cfgDebugChannelId = mkId 1179134931461480519
       -- Disabled for now
       cfgRoleReactionsMessageId = Nothing
       cfgPort = 8080
