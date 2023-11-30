@@ -43,6 +43,8 @@ data Config = Config
     cfgPotluckSignupChannelId :: ChannelId,
     -- | Discord channel to log to
     cfgLogChannelId :: ChannelId,
+    -- | Discord channel to debug to
+    cfgDebugChannelId :: ChannelId,
     -- | Port to listen on.
     cfgPort :: Int,
     -- | User agent to use for Reddit API requests.

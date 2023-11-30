@@ -67,7 +67,14 @@ fetchPosts = do
   let ptr = runRedditT env $ subredditPosts 50 "pokemontrades" New
       bbe = runRedditT env $ subredditPosts 5 "BankBallExchange" New
   (ptrPosts, bbePosts) <- liftIO $ concurrently ptr bbe
-  lift $ notifyDiscord (Log ("BBE posts: " <> T.intercalate ", " (map (unPostID . postId) bbePosts)))
+  lift $
+    notifyDiscord
+      ( Debug
+          ( T.intercalate
+              ", "
+              (map (\p -> (unPostID . postId $ p) <> " (" <> (T.pack . show $ postCreatedTime p) <> ")") bbePosts)
+          )
+      )
   pure $ ptrPosts <> bbePosts
 
 -- | Thread to stream Reddit posts and process them
