@@ -39,7 +39,9 @@ import Discord.Types
 import Parser (DiscordCommand (..), parseDiscordCommand)
 import Pokemon
 import Reddit (ID (..), Post (..), getPost, runRedditT)
-import Setup.Game (Game (..)) -- from apripsql
+import Setup.Game (Game (..)) -- Setup.* is from apripsql
+import Setup.GenderRatio (GenderRatio (..))
+import qualified Setup.Type as Type
 import System.Random (randomRIO)
 import Text.Printf (printf)
 import Trans
@@ -349,15 +351,15 @@ respondEM withParents m mGame mPkmn = withContext ("respondEM (`" <> messageCont
                   replyTo m Nothing . T.pack $ printf "%s has no egg moves in %s" fullName (show game)
                 -- Egg moves
                 ems' -> do
-                  let makeEmEmbedWithParents :: Q.EggMoveParents -> CreateEmbed
-                      makeEmEmbedWithParents emp =
+                  let makeEmEmbedWithParents :: Int -> Q.EggMoveParents -> CreateEmbed
+                      makeEmEmbedWithParents n emp =
                         def
-                          { createEmbedTitle = Q.emName (Q.empMove emp),
+                          { createEmbedTitle = "" <> tshow n <> ". " <> Q.emName (Q.empMove emp),
                             createEmbedDescription = createEmEmbedDescription emp,
                             createEmbedColor = Just DiscordColorLuminousVividPink
                           }
                   let emText = T.pack $ printf "%s egg moves in %s: %s" fullName (show game) (T.intercalate ", " (map (Q.emName . Q.empMove) ems'))
-                  let embeds = map makeEmEmbedWithParents ems'
+                  let embeds = zipWith makeEmEmbedWithParents [1 :: Int ..] ems'
                   let postSubsequentEms remainingEmbeds =
                         case splitAt 3 remainingEmbeds of
                           ([], []) -> pure ()
@@ -405,7 +407,9 @@ respondEM withParents m mGame mPkmn = withContext ("respondEM (`" <> messageCont
                   let emEmbedShort =
                         def
                           { createEmbedTitle = "Descriptions",
-                            createEmbedDescription = T.intercalate "\n" (map (\e -> "**" <> Q.emName e <> "**: " <> Q.emFlavorText e) ems'),
+                            createEmbedDescription =
+                              T.intercalate "\n" $
+                                zipWith (\n e -> tshow n <> ". **" <> Q.emName e <> "**: " <> Q.emFlavorText e) [1 :: Int ..] ems',
                             createEmbedColor = Just DiscordColorLuminousVividPink
                           }
                   restCall_ $
@@ -502,21 +506,41 @@ respondInfo m mPkmn = withContext ("respondInfo (`" <> messageContent m <> "`)")
         -- One species
         FoundOne sp -> do
           let fullName = mkFullName (dbName sp) (dbForm sp)
+          -- Typing
+          let typing =
+                let typeIdToText = T.pack . Type.toString . toEnum . pred
+                 in case (dbType1Id sp, dbType2Id sp) of
+                      (t1, Nothing) -> typeIdToText t1
+                      (t1, Just t2) -> typeIdToText t1 <> "/" <> typeIdToText t2
+              typingText = "**Type** " <> typing
           -- Base stats
           let bsText =
-                "### Base stats\n"
+                "**Base stats** "
                   <> "HP "
                   <> tshow (dbHp sp)
-                  <> " · Atk "
+                  <> " • Atk "
                   <> tshow (dbAtk sp)
-                  <> " · Def "
+                  <> " • Def "
                   <> tshow (dbDef sp)
-                  <> " · SpA "
+                  <> " • SpA "
                   <> tshow (dbSpa sp)
-                  <> " · SpD "
+                  <> " • SpD "
                   <> tshow (dbSpd sp)
-                  <> " · Spe "
+                  <> " • Spe "
                   <> tshow (dbSpe sp)
+          -- Gender ratio
+          let gr = toEnum . pred $ dbGenderRatioId sp
+              grText = "**Gender ratio** " <> case gr of
+                Genderless -> "Genderless"
+                FemaleOnly -> ":female_sign: 100%"
+                Female71 -> ":female_sign: 87.5% :male_sign: 12.5%"
+                Female31 -> ":female_sign: 75% :male_sign: 25%"
+                Equal -> ":female_sign: 50% :male_sign: 50%"
+                Male31 -> ":female_sign: 25% :male_sign: 75%"
+                Male71 -> ":female_sign: 12.5% :male_sign: 87.5%"
+                MaleOnly -> ":male_sign: 100%"
+          -- Egg cycles
+          let ecText = "**Egg cycles** " <> tshow (dbEggCycles sp)
           -- Abilities
           let getAbilityName aid = do
                 abil <- withAppPsqlConn $ Q.getAbility aid
@@ -580,7 +604,15 @@ respondInfo m mPkmn = withContext ("respondInfo (`" <> messageContent m <> "`)")
                     createEmbedDescription =
                       T.intercalate
                         "\n"
-                        [bsText, abilText, emText, legText, natureText],
+                        [ typingText,
+                          bsText,
+                          grText,
+                          ecText,
+                          abilText,
+                          emText,
+                          legText,
+                          natureText
+                        ],
                     createEmbedUrl = "https://pokemondb.net/pokedex/" <> (T.replace " " "-" . T.toLower $ dbName sp),
                     createEmbedColor = Just DiscordColorLuminousVividPink
                   }
