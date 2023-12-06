@@ -39,7 +39,10 @@ import Discord.Types
 import Parser (DiscordCommand (..), parseDiscordCommand)
 import Pokemon
 import Reddit (ID (..), Post (..), getPost, runRedditT)
-import Setup.Game (Game (..)) -- Setup.* is from apripsql
+-- Setup.* is from apripsql
+
+import qualified Setup.EggGroup as EggGroup
+import Setup.Game (Game (..))
 import Setup.GenderRatio (GenderRatio (..))
 import qualified Setup.Type as Type
 import System.Random (randomRIO)
@@ -530,15 +533,23 @@ respondInfo m mPkmn = withContext ("respondInfo (`" <> messageContent m <> "`)")
                   <> tshow (dbSpe sp)
           -- Gender ratio
           let gr = toEnum . pred $ dbGenderRatioId sp
-              grText = "**Gender ratio** " <> case gr of
-                Genderless -> "Genderless"
-                FemaleOnly -> ":female_sign: 100%"
-                Female71 -> ":female_sign: 87.5% :male_sign: 12.5%"
-                Female31 -> ":female_sign: 75% :male_sign: 25%"
-                Equal -> ":female_sign: 50% :male_sign: 50%"
-                Male31 -> ":female_sign: 25% :male_sign: 75%"
-                Male71 -> ":female_sign: 12.5% :male_sign: 87.5%"
-                MaleOnly -> ":male_sign: 100%"
+              grText =
+                "**Gender ratio** " <> case gr of
+                  Genderless -> "Genderless"
+                  FemaleOnly -> ":female_sign: 100%"
+                  Female71 -> ":female_sign: 87.5% :male_sign: 12.5%"
+                  Female31 -> ":female_sign: 75% :male_sign: 25%"
+                  Equal -> ":female_sign: 50% :male_sign: 50%"
+                  Male31 -> ":female_sign: 25% :male_sign: 75%"
+                  Male71 -> ":female_sign: 12.5% :male_sign: 87.5%"
+                  MaleOnly -> ":male_sign: 100%"
+          -- Egg groups
+          let egs =
+                let egToText = T.pack . EggGroup.toString . toEnum . pred
+                 in case (dbEggGroup1Id sp, dbEggGroup2Id sp) of
+                      (eg1, Nothing) -> egToText eg1
+                      (eg1, Just eg2) -> egToText eg1 <> ", " <> egToText eg2
+              egText = "**Egg groups** " <> egs
           -- Egg cycles
           let ecText = "**Egg cycles** " <> tshow (dbEggCycles sp)
           -- Abilities
@@ -607,6 +618,7 @@ respondInfo m mPkmn = withContext ("respondInfo (`" <> messageContent m <> "`)")
                         [ typingText,
                           bsText,
                           grText,
+                          egText,
                           ecText,
                           abilText,
                           emText,
