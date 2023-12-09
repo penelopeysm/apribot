@@ -21,6 +21,8 @@ import Control.Monad.IO.Class (MonadIO (..))
 import Data.ByteString (ByteString)
 import Data.Char.WCWidth (wcwidth)
 import Data.List (nub, sort, sortOn)
+import Data.List.NonEmpty (NonEmpty (..))
+import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
 import Data.Maybe (catMaybes, fromMaybe, isNothing, mapMaybe)
@@ -250,17 +252,19 @@ createEmEmbedDescription em' =
           xs -> ["**Parents which learn by breeding**\n" <> T.intercalate ", " xs]
    in T.intercalate "\n\n" (Q.emFlavorText (Q.empMove em') : levelUpParents <> breedParents)
 
-didYouMean :: [Text] -> Text
+suggestWebsite :: Text
+suggestWebsite = "If you're having trouble finding a Pokémon, try looking it up at https://apribot.fly.dev/names"
+
+didYouMean :: NonEmpty Text -> Text
 didYouMean xs =
   let bolden t = "**" <> t <> "**"
-      website = "If you're having trouble finding a Pokémon, try looking it up at https://apribot.fly.dev/names"
-   in "\n\n("
-        <> ( case xs of
-               [] -> website
-               [x] -> "Did you mean: " <> bolden x <> "? " <> website
-               _ -> "Did you mean any of these: " <> T.intercalate ", " (map bolden xs) <> "? " <> website
-           )
-        <> ")"
+      didYouMeanSentence = case xs of
+        x :| [] -> "Did you mean: " <> bolden x <> "?"
+        _ -> "Did you mean any of these: " <> T.intercalate ", " (map bolden $ NE.toList xs) <> "?"
+   in T.unwords [didYouMeanSentence, suggestWebsite]
+
+parenthesise :: Text -> Text
+parenthesise t = "\n\n(" <> t <> ")"
 
 respondNature :: Message -> Maybe Text -> App DiscordHandler ()
 respondNature m mPkmn = withContext ("respondNature (`" <> messageContent m <> "`)") $ do
@@ -272,10 +276,16 @@ respondNature m mPkmn = withContext ("respondNature (`" <> messageContent m <> "
       case pkmnDetails of
         NoneFound ->
           replyTo m Nothing $
-            "No Pokémon with name '" <> pkmn <> "' found." <> didYouMean []
+            T.unwords
+              [ "No Pokémon with name '" <> pkmn <> "' found.",
+                parenthesise suggestWebsite
+              ]
         NoneFoundButSuggesting uniqueNames ->
           replyTo m Nothing $
-            "No Pokémon with name '" <> pkmn <> "' found." <> didYouMean uniqueNames
+            T.unwords
+              [ "No Pokémon with name '" <> pkmn <> "' found.",
+                parenthesise $ didYouMean uniqueNames
+              ]
         FoundOne sp -> do
           let pkmnId = dbId sp
               pkmnName = dbName sp
@@ -304,11 +314,16 @@ respondNature m mPkmn = withContext ("respondNature (`" <> messageContent m <> "
                       <> "\n(Penny's sheet is at https://tinyurl.com/tgkss; Jemma's sheets have been lost to time.)"
               replyTo m Nothing text
 
-giveRandomEMs :: Message -> Text -> [Text] -> App DiscordHandler ()
+giveRandomEMs :: Message -> Text -> Maybe (NonEmpty Text) -> App DiscordHandler ()
 giveRandomEMs m requestedPokemon suggestedUniqueNames = do
   n <- liftIO $ randomRIO (2, 6)
   moveDescs <- withAppPsqlConn $ Q.randomMoves n
-  let messageText = "I don't think " <> requestedPokemon <> " is a Pokemon, but if it was, it would have the egg moves: " <> T.intercalate ", " (map fst moveDescs) <> "!" <> didYouMean suggestedUniqueNames
+  let messageText =
+        T.unwords
+          [ "I don't think " <> requestedPokemon <> " is a Pokemon, but if it was, it would have the egg moves: ",
+            T.intercalate ", " (map fst moveDescs) <> "!",
+            parenthesise $ maybe suggestWebsite didYouMean suggestedUniqueNames
+          ]
   let embed =
         def
           { createEmbedTitle = "Descriptions",
@@ -339,8 +354,8 @@ respondEM withParents m mGame mPkmn = withContext ("respondEM (`" <> messageCont
       -- Try to fetch the Pokemon first. If it can't be found, choose some random moves
       pkmnDetails <- withAppPsqlConn $ Q.getPokemon pkmn
       case pkmnDetails of
-        NoneFound -> giveRandomEMs m pkmn []
-        NoneFoundButSuggesting uniqueNames -> giveRandomEMs m pkmn uniqueNames
+        NoneFound -> giveRandomEMs m pkmn Nothing
+        NoneFoundButSuggesting uniqueNames -> giveRandomEMs m pkmn (Just uniqueNames)
         -- One exact match found. Calculate egg moves
         FoundOne sp -> do
           let id' = dbId sp
@@ -442,7 +457,7 @@ makeHAEmbed (ha', desc') =
             createEmbedColor = Just DiscordColorLuminousVividPink
           }
 
-giveRandomHA :: Message -> Text -> [Text] -> App DiscordHandler ()
+giveRandomHA :: Message -> Text -> Maybe (NonEmpty Text) -> App DiscordHandler ()
 giveRandomHA m requestedPokemon suggestedUniqueNames = do
   (ha', desc') <- withAppPsqlConn Q.randomAbility
   restCall_ $
@@ -450,7 +465,11 @@ giveRandomHA m requestedPokemon suggestedUniqueNames = do
       (messageChannelId m)
       ( def
           { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
-            DR.messageDetailedContent = "I don't think " <> requestedPokemon <> " is a Pokemon, but if it was, it would have the hidden ability " <> ha' <> "!" <> didYouMean suggestedUniqueNames,
+            DR.messageDetailedContent =
+              T.unwords
+                [ "I don't think " <> requestedPokemon <> " is a Pokemon, but if it was, it would have the hidden ability " <> ha' <> "!",
+                  parenthesise $ maybe suggestWebsite didYouMean suggestedUniqueNames
+                ],
             DR.messageDetailedAllowedMentions = Nothing,
             DR.messageDetailedEmbeds = (: []) <$> makeHAEmbed (ha', desc')
           }
@@ -465,8 +484,8 @@ respondHA m mPkmn = withContext ("respondHA (`" <> messageContent m <> "`)") $ d
       pkmnDetails <- withAppPsqlConn $ Q.getPokemon pkmn
       case pkmnDetails of
         -- Not a Pokemon
-        NoneFound -> giveRandomHA m pkmn []
-        NoneFoundButSuggesting uniqueNames -> giveRandomHA m pkmn uniqueNames
+        NoneFound -> giveRandomHA m pkmn Nothing
+        NoneFoundButSuggesting uniqueNames -> giveRandomHA m pkmn (Just uniqueNames)
         -- One species
         FoundOne sp -> do
           let fullName = mkFullName (dbName sp) (dbForm sp)
@@ -504,8 +523,12 @@ respondInfo m mPkmn = withContext ("respondInfo (`" <> messageContent m <> "`)")
       pkmnDetails <- withAppPsqlConn $ Q.getPokemon pkmn
       case pkmnDetails of
         -- Not a Pokemon
-        NoneFound -> replyTo m Nothing $ "No Pokémon with name '" <> pkmn <> "' found." <> didYouMean []
-        NoneFoundButSuggesting uniqueNames -> replyTo m Nothing $ "No Pokémon with name '" <> pkmn <> "' found." <> didYouMean uniqueNames
+        NoneFound ->
+          replyTo m Nothing $
+            T.unwords ["No Pokémon with name '" <> pkmn <> "' found.", parenthesise suggestWebsite]
+        NoneFoundButSuggesting uniqueNames ->
+          replyTo m Nothing $
+            T.unwords ["No Pokémon with name '" <> pkmn <> "' found.", parenthesise $ didYouMean uniqueNames]
         -- One species
         FoundOne sp -> do
           let fullName = mkFullName (dbName sp) (dbForm sp)
@@ -679,8 +702,12 @@ respondLegality m mPkmn = withContext ("respondLegality (`" <> messageContent m 
       -- Try to fetch the Pokemon first.
       pkmnDetails <- withAppPsqlConn $ Q.getPokemon pkmn
       case pkmnDetails of
-        NoneFound -> replyTo m Nothing $ "No Pokémon with name '" <> pkmn <> "' found." <> didYouMean []
-        NoneFoundButSuggesting uniqueNames -> replyTo m Nothing $ "No Pokémon with name '" <> pkmn <> "' found." <> didYouMean uniqueNames
+        NoneFound ->
+          replyTo m Nothing $
+            T.unwords ["No Pokémon with name '" <> pkmn <> "' found.", parenthesise suggestWebsite]
+        NoneFoundButSuggesting uniqueNames ->
+          replyTo m Nothing $
+            T.unwords ["No Pokémon with name '" <> pkmn <> "' found.", parenthesise $ didYouMean uniqueNames]
         FoundOne spkmn -> do
           unbreedable <- withAppPsqlConn $ Q.isPokemonUnbreedable (dbId spkmn)
           let fullName = mkFullName (dbName spkmn) (dbForm spkmn)
@@ -698,10 +725,14 @@ respondSprite m mPkmn = withContext ("respondSprite (`" <> messageContent m <> "
     Nothing -> replyTo m Nothing "usage: `!sprite {pokemon}` (e.g. `!sprite togepi`)"
     Just pkmn -> do
       -- Try to fetch the Pokemon first.
-      pkmnDetails <- withAppPsqlConn $ Q.getPokemon pkmn
+      pkmnDetails <- withAppPsqlConn $ Q.getPokemonWithSameNdex pkmn
       case pkmnDetails of
-        NoneFound -> replyTo m Nothing $ "No Pokémon with name '" <> pkmn <> "' found." <> didYouMean []
-        NoneFoundButSuggesting uniqueNames -> replyTo m Nothing $ "No Pokémon with name '" <> pkmn <> "' found." <> didYouMean uniqueNames
+        NoneFound ->
+          replyTo m Nothing $
+            T.unwords ["No Pokémon with name '" <> pkmn <> "' found.", parenthesise suggestWebsite]
+        NoneFoundButSuggesting uniqueNames ->
+          replyTo m Nothing $
+            T.unwords ["No Pokémon with name '" <> pkmn <> "' found.", parenthesise $ didYouMean uniqueNames]
         FoundOne result -> do
           let pkmnName = dbName result
               pkmnForm = dbForm result
