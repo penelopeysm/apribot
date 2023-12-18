@@ -1,6 +1,7 @@
 module RedditBot (redditBot) where
 
 import Control.Concurrent.Async (concurrently)
+import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Database
@@ -59,23 +60,26 @@ process post = do
       notifyDiscord (NotifyPost post)
     _ -> pure ()
 
--- | Fetch posts from pokemontrades and BankBallExchange.
-fetchPosts :: RedditT (App IO) [Post]
-fetchPosts = do
+-- | Action to fetch posts from a subreddit
+fetchPosts :: Int -> Text -> RedditT (App IO) [Post]
+fetchPosts n subreddit = do
   env <- ask
-  lift $ atomically $ T.putStrLn "Fetching posts from subreddits..."
-  let ptr = runRedditT env $ subredditPosts 50 "pokemontrades" New
-      bbe = runRedditT env $ subredditPosts 5 "BankBallExchange" New
-  (ptrPosts, bbePosts) <- liftIO $ concurrently ptr bbe
-  lift $
-    notifyDiscord
-      ( Debug
-          ( T.intercalate
-              ", "
-              (map (\p -> (unPostID . postId $ p) <> " (" <> (T.pack . show $ postCreatedTime p) <> ")") bbePosts)
-          )
-      )
-  pure $ ptrPosts <> bbePosts
+  lift $ atomically $ T.putStrLn $ "Fetching posts from r/" <> subreddit <> "..."
+  runRedditT env $ subredditPosts n subreddit New
+
+-- | Stream posts from a subreddit, but additionally unwrap the monad
+-- transformer stack
+streamReddit :: Config -> RedditEnv -> Int -> Text -> IO ()
+streamReddit cfg env n subreddit = do
+  let settings =
+        defaultStreamSettings
+          { streamsDelay = cfgRedditStreamDelay cfg,
+            streamsStorageSize = 2 * n
+          }
+      -- Unwind monad transformers. :upside_down_smile:
+      unwrapApp = runAppWith cfg
+      unwrapReddit = runRedditT env
+   in unwrapApp . unwrapReddit $ stream' settings (lift . process) unwrapApp (fetchPosts n subreddit)
 
 -- | Thread to stream Reddit posts and process them
 redditBot :: App IO ()
@@ -83,9 +87,4 @@ redditBot = do
   atomically $ T.putStrLn "Starting Reddit bot..."
   cfg <- ask
   redditEnv <- authenticateAsOwner
-  let settings =
-        defaultStreamSettings
-          { streamsDelay = cfgRedditStreamDelay cfg,
-            streamsStorageSize = 400
-          }
-  runRedditT redditEnv $ stream' settings (lift . process) (runAppWith cfg) fetchPosts
+  void $ liftIO $ concurrently (streamReddit cfg redditEnv 50 "pokemontrades") (streamReddit cfg redditEnv 5 "bankballexchange")

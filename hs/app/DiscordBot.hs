@@ -41,14 +41,11 @@ import Discord.Types
 import Parser (DiscordCommand (..), parseDiscordCommand)
 import Pokemon
 import Reddit (ID (..), Post (..), getPost, runRedditT)
--- Setup.* is from apripsql
-
 import qualified Setup.EggGroup as EggGroup
 import Setup.Game (Game (..))
 import Setup.GenderRatio (GenderRatio (..))
 import qualified Setup.Type as Type
 import System.Random (randomRIO)
-import Text.Printf (printf)
 import Trans
 import Utils (makeTable)
 
@@ -130,6 +127,7 @@ eventHandler e = withContext "eventHandler" $ do
             Just CloseThread -> closeThread m
             Just PotluckVotes -> respondPotluckVotes m
             Just PotluckSignup -> respondPotluckSignup m
+            Just Sandwich -> respondSandwich m
             Just (Info pkmnName) -> respondInfo m pkmnName
             Just (HA pkmnName) -> respondHA m pkmnName
             Just (EM game pkmnName) -> respondEM False m game pkmnName
@@ -263,6 +261,15 @@ didYouMean xs =
         _ -> "Did you mean any of these: " <> T.intercalate ", " (map bolden $ NE.toList xs) <> "?"
    in T.unwords [didYouMeanSentence, suggestWebsite]
 
+guessingYouMeant :: Q.DBPokemon -> NonEmpty Text -> Text
+guessingYouMeant sp uniqueNames =
+  let italicise t = "*" <> t <> "*"
+   in "I'm guessing you meant **"
+        <> mkFullName (dbName sp) (dbForm sp)
+        <> "**. The possibilities were: "
+        <> T.intercalate ", " (NE.toList $ NE.map italicise uniqueNames)
+        <> ".\n\n"
+
 parenthesise :: Text -> Text
 parenthesise t = "\n\n(" <> t <> ")"
 
@@ -286,17 +293,24 @@ respondNature m mPkmn = withContext ("respondNature (`" <> messageContent m <> "
               [ "No Pokémon with name '" <> pkmn <> "' found.",
                 parenthesise $ didYouMean uniqueNames
               ]
-        FoundOne sp -> do
+        AliasedToAndSuggesting sp uniqueNames ->
+          replyWithSuggestedNatures (guessingYouMeant sp uniqueNames) sp
+        FoundOne sp ->
+          replyWithSuggestedNatures "" sp
+      where
+        replyWithSuggestedNatures :: Text -> Q.DBPokemon -> App DiscordHandler ()
+        replyWithSuggestedNatures messagePrefix sp = do
           let pkmnId = dbId sp
               pkmnName = dbName sp
               pkmnForm = dbForm sp
           let fullName = mkFullName pkmnName pkmnForm
           suggestedNatures <- getSuggestedNatures pkmnId
           case suggestedNatures of
-            Nothing -> replyTo m Nothing $ "No suggested natures found for " <> fullName <> "."
+            Nothing -> replyTo m Nothing $ messagePrefix <> "No suggested natures found for " <> fullName <> "."
             Just sn -> do
               let text =
-                    "Suggested natures for "
+                    messagePrefix
+                      <> "Suggested natures for "
                       <> fullName
                       <> ":"
                       <> case penny sn of
@@ -311,13 +325,12 @@ respondNature m mPkmn = withContext ("respondNature (`" <> messageContent m <> "
                       <> case jemmaG7 sn of
                         Nothing -> ""
                         Just n -> "\n- Jemma's G7 sheet (Smogon): " <> n
-                      <> "\n(Penny's sheet is at https://tinyurl.com/tgkss; Jemma's sheets have been lost to time.)"
               replyTo m Nothing text
 
 giveRandomEMs :: Message -> Text -> Maybe (NonEmpty Text) -> App DiscordHandler ()
 giveRandomEMs m requestedPokemon suggestedUniqueNames = do
   n <- liftIO $ randomRIO (2, 6)
-  moveDescs <- withAppPsqlConn $ Q.randomMoves n
+  moveDescs <- sort <$> withAppPsqlConn (Q.randomMoves n)
   let messageText =
         T.unwords
           [ "I don't think " <> requestedPokemon <> " is a Pokemon, but if it was, it would have the egg moves: ",
@@ -327,7 +340,10 @@ giveRandomEMs m requestedPokemon suggestedUniqueNames = do
   let embed =
         def
           { createEmbedTitle = "Descriptions",
-            createEmbedDescription = T.intercalate "\n" (map (\(m', d') -> "**" <> m' <> "**: " <> d') moveDescs),
+            createEmbedDescription =
+              T.intercalate
+                "\n"
+                (zipWith (\i (m', d') -> tshow i <> ". **" <> m' <> "**: " <> d') [(1 :: Int) ..] moveDescs),
             createEmbedColor = Just DiscordColorLuminousVividPink
           }
   restCall_ $
@@ -356,80 +372,56 @@ respondEM withParents m mGame mPkmn = withContext ("respondEM (`" <> messageCont
       case pkmnDetails of
         NoneFound -> giveRandomEMs m pkmn Nothing
         NoneFoundButSuggesting uniqueNames -> giveRandomEMs m pkmn (Just uniqueNames)
-        -- One exact match found. Calculate egg moves
-        FoundOne sp -> do
-          let id' = dbId sp
-          let fullName = mkFullName (dbName sp) (dbForm sp)
-          if withParents
-            then do
-              ems <- withAppPsqlConn $ Q.getEMParents game id'
-              case ems of
-                -- No egg moves
-                [] ->
-                  replyTo m Nothing . T.pack $ printf "%s has no egg moves in %s" fullName (show game)
-                -- Egg moves
-                ems' -> do
-                  let makeEmEmbedWithParents :: Int -> Q.EggMoveParents -> CreateEmbed
-                      makeEmEmbedWithParents n emp =
-                        def
-                          { createEmbedTitle = "" <> tshow n <> ". " <> Q.emName (Q.empMove emp),
-                            createEmbedDescription = createEmEmbedDescription emp,
-                            createEmbedColor = Just DiscordColorLuminousVividPink
-                          }
-                  let emText = T.pack $ printf "%s egg moves in %s: %s" fullName (show game) (T.intercalate ", " (map (Q.emName . Q.empMove) ems'))
-                  let embeds = zipWith makeEmEmbedWithParents [1 :: Int ..] ems'
-                  let postSubsequentEms remainingEmbeds =
-                        case splitAt 3 remainingEmbeds of
-                          ([], []) -> pure ()
-                          (xs, ys) -> do
-                            restCall_ $
-                              DR.CreateMessageDetailed
-                                (messageChannelId m)
-                                ( def
-                                    { DR.messageDetailedReference = Nothing,
-                                      DR.messageDetailedContent = "",
-                                      DR.messageDetailedAllowedMentions = Nothing,
-                                      DR.messageDetailedEmbeds = Just xs
-                                    }
-                                )
-                            postSubsequentEms ys
-                  case splitAt 3 embeds of
-                    (xs, ys) -> do
-                      restCall_ $
-                        DR.CreateMessageDetailed
-                          (messageChannelId m)
-                          ( def
-                              { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
-                                DR.messageDetailedContent = emText,
-                                DR.messageDetailedAllowedMentions = Nothing,
-                                DR.messageDetailedEmbeds = Just xs
-                              }
-                          )
-                      postSubsequentEms ys
-            else do
-              -- Parents not requested
-              ems <- withAppPsqlConn $ Q.getEMs game id'
-              case ems of
-                -- No egg moves
-                [] ->
-                  replyTo m Nothing . T.pack $ printf "%s has no egg moves in %s" fullName (show game)
-                -- Egg moves
-                ems' -> do
-                  let emText =
-                        T.pack $
-                          printf
-                            "%s egg moves in %s: %s\nFor full details about parents, use `!emp {game} {pokemon}` instead."
-                            fullName
-                            (show game)
-                            (T.intercalate ", " (map Q.emName ems'))
-                  let emEmbedShort =
-                        def
-                          { createEmbedTitle = "Descriptions",
-                            createEmbedDescription =
-                              T.intercalate "\n" $
-                                zipWith (\n e -> tshow n <> ". **" <> Q.emName e <> "**: " <> Q.emFlavorText e) [1 :: Int ..] ems',
-                            createEmbedColor = Just DiscordColorLuminousVividPink
-                          }
+        AliasedToAndSuggesting sp uniqueNames -> do
+          replyWithEMs (guessingYouMeant sp uniqueNames) withParents sp game
+        FoundOne sp ->
+          replyWithEMs "" withParents sp game
+  where
+    replyWithEMs :: Text -> Bool -> Q.DBPokemon -> Game -> App DiscordHandler ()
+    replyWithEMs messagePrefix withParents' sp game = do
+      let id' = dbId sp
+      let fullName = mkFullName (dbName sp) (dbForm sp)
+      if withParents'
+        then do
+          ems <- sort <$> withAppPsqlConn (Q.getEMParents game id')
+          case ems of
+            -- No egg moves
+            [] ->
+              replyTo m Nothing $ messagePrefix <> fullName <> " has no egg moves in " <> tshow game
+            -- Egg moves
+            ems' -> do
+              let makeEmEmbedWithParents :: Int -> Q.EggMoveParents -> CreateEmbed
+                  makeEmEmbedWithParents n emp =
+                    def
+                      { createEmbedTitle = "" <> tshow n <> ". " <> Q.emName (Q.empMove emp),
+                        createEmbedDescription = createEmEmbedDescription emp,
+                        createEmbedColor = Just DiscordColorLuminousVividPink
+                      }
+              let emText =
+                    messagePrefix
+                      <> fullName
+                      <> " egg moves in "
+                      <> tshow game
+                      <> ": "
+                      <> T.intercalate ", " (map (Q.emName . Q.empMove) ems')
+              let embeds = zipWith makeEmEmbedWithParents [1 :: Int ..] ems'
+              let postSubsequentEms remainingEmbeds =
+                    case splitAt 3 remainingEmbeds of
+                      ([], []) -> pure ()
+                      (xs, ys) -> do
+                        restCall_ $
+                          DR.CreateMessageDetailed
+                            (messageChannelId m)
+                            ( def
+                                { DR.messageDetailedReference = Nothing,
+                                  DR.messageDetailedContent = "",
+                                  DR.messageDetailedAllowedMentions = Nothing,
+                                  DR.messageDetailedEmbeds = Just xs
+                                }
+                            )
+                        postSubsequentEms ys
+              case splitAt 3 embeds of
+                (xs, ys) -> do
                   restCall_ $
                     DR.CreateMessageDetailed
                       (messageChannelId m)
@@ -437,9 +429,49 @@ respondEM withParents m mGame mPkmn = withContext ("respondEM (`" <> messageCont
                           { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
                             DR.messageDetailedContent = emText,
                             DR.messageDetailedAllowedMentions = Nothing,
-                            DR.messageDetailedEmbeds = Just [emEmbedShort]
+                            DR.messageDetailedEmbeds = Just xs
                           }
                       )
+                  postSubsequentEms ys
+        else do
+          -- Parents not requested
+          ems <- sort <$> withAppPsqlConn (Q.getEMs game id')
+          case ems of
+            -- No egg moves
+            [] -> do
+              replyTo m Nothing $ messagePrefix <> fullName <> " has no egg moves in " <> tshow game
+            -- Egg moves
+            ems' -> do
+              let emText =
+                    messagePrefix
+                      <> fullName
+                      <> " egg moves in "
+                      <> tshow game
+                      <> ": "
+                      <> T.intercalate ", " (map Q.emName ems')
+                      <> "\nFor full details about parents, use `!emp "
+                      <> T.toLower (tshow game)
+                      <> " "
+                      <> dbUniqueName sp
+                      <> "` instead."
+              let emEmbedShort =
+                    def
+                      { createEmbedTitle = "Descriptions",
+                        createEmbedDescription =
+                          T.intercalate "\n" $
+                            zipWith (\n e -> tshow n <> ". **" <> Q.emName e <> "**: " <> Q.emFlavorText e) [1 :: Int ..] ems',
+                        createEmbedColor = Just DiscordColorLuminousVividPink
+                      }
+              restCall_ $
+                DR.CreateMessageDetailed
+                  (messageChannelId m)
+                  ( def
+                      { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
+                        DR.messageDetailedContent = emText,
+                        DR.messageDetailedAllowedMentions = Nothing,
+                        DR.messageDetailedEmbeds = Just [emEmbedShort]
+                      }
+                  )
 
 makeHAEmbed :: (Text, Text) -> Maybe CreateEmbed
 makeHAEmbed (ha', desc') =
@@ -483,36 +515,42 @@ respondHA m mPkmn = withContext ("respondHA (`" <> messageContent m <> "`)") $ d
       -- Try to fetch the Pokemon first. If it can't be found, choose some random moves
       pkmnDetails <- withAppPsqlConn $ Q.getPokemon pkmn
       case pkmnDetails of
-        -- Not a Pokemon
-        NoneFound -> giveRandomHA m pkmn Nothing
-        NoneFoundButSuggesting uniqueNames -> giveRandomHA m pkmn (Just uniqueNames)
-        -- One species
-        FoundOne sp -> do
-          let fullName = mkFullName (dbName sp) (dbForm sp)
-          let piplupNote = "(Note that prior to SV, the Piplup family had Defiant as their HA.)"
-              allNotes :: Map Text Text
-              allNotes =
-                M.fromList
-                  [ ("Piplup", piplupNote),
-                    ("Prinplup", piplupNote),
-                    ("Empoleon", piplupNote),
-                    ("Ferroseed", "(Note that Ferrothorn has Anticipation as its HA.)")
-                  ]
-              note = case M.lookup (dbName sp) allNotes of Just d -> "\n" <> d; Nothing -> ""
-          case dbHiddenAbilityId sp of
-            Nothing -> replyTo m Nothing $ fullName <> " has no hidden ability." <> note
-            Just haId -> do
-              (haName, haDesc) <- withAppPsqlConn $ Q.getAbility haId
-              restCall_ $
-                DR.CreateMessageDetailed
-                  (messageChannelId m)
-                  ( def
-                      { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
-                        DR.messageDetailedContent = fullName <> "'s hidden ability is: " <> haName <> note,
-                        DR.messageDetailedAllowedMentions = Nothing,
-                        DR.messageDetailedEmbeds = (: []) <$> makeHAEmbed (haName, haDesc)
-                      }
-                  )
+        NoneFound ->
+          giveRandomHA m pkmn Nothing
+        NoneFoundButSuggesting uniqueNames ->
+          giveRandomHA m pkmn (Just uniqueNames)
+        AliasedToAndSuggesting sp uniqueNames ->
+          replyWithRealHA (guessingYouMeant sp uniqueNames) sp
+        FoundOne sp ->
+          replyWithRealHA "" sp
+  where
+    replyWithRealHA :: Text -> Q.DBPokemon -> App DiscordHandler ()
+    replyWithRealHA messagePrefix sp = do
+      let fullName = mkFullName (dbName sp) (dbForm sp)
+      let piplupNote = "(Note that prior to SV, the Piplup family had Defiant as their HA.)"
+          allNotes :: Map Text Text
+          allNotes =
+            M.fromList
+              [ ("Piplup", piplupNote),
+                ("Prinplup", piplupNote),
+                ("Empoleon", piplupNote),
+                ("Ferroseed", "(Note that Ferrothorn has Anticipation as its HA.)")
+              ]
+          note = case M.lookup (dbName sp) allNotes of Just d -> "\n" <> d; Nothing -> ""
+      case dbHiddenAbilityId sp of
+        Nothing -> replyTo m Nothing $ messagePrefix <> fullName <> " has no hidden ability." <> note
+        Just haId -> do
+          (haName, haDesc) <- withAppPsqlConn $ Q.getAbility haId
+          restCall_ $
+            DR.CreateMessageDetailed
+              (messageChannelId m)
+              ( def
+                  { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
+                    DR.messageDetailedContent = messagePrefix <> fullName <> "'s hidden ability is: " <> haName <> note,
+                    DR.messageDetailedAllowedMentions = Nothing,
+                    DR.messageDetailedEmbeds = (: []) <$> makeHAEmbed (haName, haDesc)
+                  }
+              )
 
 respondInfo :: Message -> Maybe Text -> App DiscordHandler ()
 respondInfo m mPkmn = withContext ("respondInfo (`" <> messageContent m <> "`)") $ do
@@ -529,138 +567,143 @@ respondInfo m mPkmn = withContext ("respondInfo (`" <> messageContent m <> "`)")
         NoneFoundButSuggesting uniqueNames ->
           replyTo m Nothing $
             T.unwords ["No Pokémon with name '" <> pkmn <> "' found.", parenthesise $ didYouMean uniqueNames]
-        -- One species
-        FoundOne sp -> do
-          let fullName = mkFullName (dbName sp) (dbForm sp)
-          -- Typing
-          let typing =
-                let typeIdToText = T.pack . Type.toString . toEnum . pred
-                 in case (dbType1Id sp, dbType2Id sp) of
-                      (t1, Nothing) -> typeIdToText t1
-                      (t1, Just t2) -> typeIdToText t1 <> "/" <> typeIdToText t2
-              typingText = "**Type** " <> typing
-          -- Base stats
-          let bsText =
-                "**Base stats** "
-                  <> "HP "
-                  <> tshow (dbHp sp)
-                  <> " • Atk "
-                  <> tshow (dbAtk sp)
-                  <> " • Def "
-                  <> tshow (dbDef sp)
-                  <> " • SpA "
-                  <> tshow (dbSpa sp)
-                  <> " • SpD "
-                  <> tshow (dbSpd sp)
-                  <> " • Spe "
-                  <> tshow (dbSpe sp)
-          -- Gender ratio
-          let gr = toEnum . pred $ dbGenderRatioId sp
-              grText =
-                "**Gender ratio** " <> case gr of
-                  Genderless -> "Genderless"
-                  FemaleOnly -> ":female_sign: 100%"
-                  Female71 -> ":female_sign: 87.5% :male_sign: 12.5%"
-                  Female31 -> ":female_sign: 75% :male_sign: 25%"
-                  Equal -> ":female_sign: 50% :male_sign: 50%"
-                  Male31 -> ":female_sign: 25% :male_sign: 75%"
-                  Male71 -> ":female_sign: 12.5% :male_sign: 87.5%"
-                  MaleOnly -> ":male_sign: 100%"
-          -- Egg groups
-          let egs =
-                let egToText = T.pack . EggGroup.toString . toEnum . pred
-                 in case (dbEggGroup1Id sp, dbEggGroup2Id sp) of
-                      (eg1, Nothing) -> egToText eg1
-                      (eg1, Just eg2) -> egToText eg1 <> ", " <> egToText eg2
-              egText = "**Egg groups** " <> egs
-          -- Egg cycles
-          let ecText = "**Egg cycles** " <> tshow (dbEggCycles sp)
-          -- Abilities
-          let getAbilityName aid = do
-                abil <- withAppPsqlConn $ Q.getAbility aid
-                pure $ fst abil
-          abil1Name <- getAbilityName (dbAbility1Id sp)
-          abil2Name <- mapM getAbilityName (dbAbility2Id sp)
-          haName <- mapM getAbilityName (dbHiddenAbilityId sp)
-          let abilText =
-                "### Abilities\n"
-                  <> abil1Name
-                  <> maybe "" (", " <>) abil2Name
-                  <> maybe " *(no HA)*" (\a -> ", **" <> a <> " (HA)**") haName
+        AliasedToAndSuggesting sp uniqueNames ->
+          replyWithInfo (guessingYouMeant sp uniqueNames) sp
+        FoundOne sp ->
+          replyWithInfo "" sp
+  where
+    replyWithInfo :: Text -> Q.DBPokemon -> App DiscordHandler ()
+    replyWithInfo messagePrefix sp = do
+      let fullName = mkFullName (dbName sp) (dbForm sp)
+      -- Typing
+      let typing =
+            let typeIdToText = T.pack . Type.toString . toEnum . pred
+             in case (dbType1Id sp, dbType2Id sp) of
+                  (t1, Nothing) -> typeIdToText t1
+                  (t1, Just t2) -> typeIdToText t1 <> "/" <> typeIdToText t2
+          typingText = "**Type** " <> typing
+      -- Base stats
+      let bsText =
+            "**Base stats** "
+              <> "HP "
+              <> tshow (dbHp sp)
+              <> " • Atk "
+              <> tshow (dbAtk sp)
+              <> " • Def "
+              <> tshow (dbDef sp)
+              <> " • SpA "
+              <> tshow (dbSpa sp)
+              <> " • SpD "
+              <> tshow (dbSpd sp)
+              <> " • Spe "
+              <> tshow (dbSpe sp)
+      -- Gender ratio
+      let gr = toEnum . pred $ dbGenderRatioId sp
+          grText =
+            "**Gender ratio** " <> case gr of
+              Genderless -> "Genderless"
+              FemaleOnly -> ":female_sign: 100%"
+              Female71 -> ":female_sign: 87.5% :male_sign: 12.5%"
+              Female31 -> ":female_sign: 75% :male_sign: 25%"
+              Equal -> ":female_sign: 50% :male_sign: 50%"
+              Male31 -> ":female_sign: 25% :male_sign: 75%"
+              Male71 -> ":female_sign: 12.5% :male_sign: 87.5%"
+              MaleOnly -> ":male_sign: 100%"
+      -- Egg groups
+      let egs =
+            let egToText = T.pack . EggGroup.toString . toEnum . pred
+             in case (dbEggGroup1Id sp, dbEggGroup2Id sp) of
+                  (eg1, Nothing) -> egToText eg1
+                  (eg1, Just eg2) -> egToText eg1 <> ", " <> egToText eg2
+          egText = "**Egg groups** " <> egs
+      -- Egg cycles
+      let ecText = "**Egg cycles** " <> tshow (dbEggCycles sp)
+      -- Abilities
+      let getAbilityName aid = do
+            abil <- withAppPsqlConn $ Q.getAbility aid
+            pure $ fst abil
+      abil1Name <- getAbilityName (dbAbility1Id sp)
+      abil2Name <- mapM getAbilityName (dbAbility2Id sp)
+      haName <- mapM getAbilityName (dbHiddenAbilityId sp)
+      let abilText =
+            "### Abilities\n"
+              <> abil1Name
+              <> maybe "" (", " <>) abil2Name
+              <> maybe " *(no HA)*" (\a -> ", **" <> a <> " (HA)**") haName
 
-          -- EMs
-          let getEMNames game = do
-                ems <- withAppPsqlConn $ Q.getEMs game (dbId sp)
-                pure $ map Q.emName ems
-          emsUsum <- getEMNames USUM
-          emsSwsh <- getEMNames SwSh
-          emsBdsp <- getEMNames BDSP
-          emsSv <- getEMNames SV
-          let makeEmTextIn (ems, game) = "**" <> game <> "** " <> T.intercalate ", " (sort ems)
-          let emText =
-                "### Egg moves\n"
-                  <> case filter
-                    (not . null . fst)
-                    [ (emsUsum, "USUM"),
-                      (emsSwsh, "SwSh"),
-                      (emsBdsp, "BDSP"),
-                      (emsSv, "SV")
-                    ] of
-                    [] -> "None."
-                    emsAndGames -> T.intercalate "\n" (map makeEmTextIn emsAndGames)
-          -- Legality
-          legalities <- getLegality (dbId sp)
-          unbreedable <- withAppPsqlConn $ Q.isPokemonUnbreedable (dbId sp)
-          let legText = "### Legality\n" <> mkLegalityText legalities unbreedable
-          -- Natures
-          suggestedNatures <- getSuggestedNatures (dbId sp)
-          let natureText =
-                "### Suggested natures\n" <> case suggestedNatures of
-                  Nothing -> "None."
-                  Just sn ->
-                    do
-                      case penny sn of
-                        Nothing -> ""
-                        Just n -> "\n**Penny** " <> n
-                      <> case jemmaSwSh sn of
-                        Nothing -> ""
-                        Just n -> "\n**Jemma SwSh** " <> n
-                      <> case jemmaBDSP sn of
-                        Nothing -> ""
-                        Just n -> "\n**Jemma BDSP** " <> n
-                      <> case jemmaG7 sn of
-                        Nothing -> ""
-                        Just n -> "\n**Jemma G7** " <> n
-          -- Put it all together
-          let embed =
-                def
-                  { createEmbedTitle = fullName <> " (#" <> tshow (dbNdex sp) <> ")",
-                    createEmbedDescription =
-                      T.intercalate
-                        "\n"
-                        [ typingText,
-                          bsText,
-                          grText,
-                          egText,
-                          ecText,
-                          abilText,
-                          emText,
-                          legText,
-                          natureText
-                        ],
-                    createEmbedUrl = "https://pokemondb.net/pokedex/" <> (T.replace " " "-" . T.toLower $ dbName sp),
-                    createEmbedColor = Just DiscordColorLuminousVividPink
-                  }
-          restCall_ $
-            DR.CreateMessageDetailed
-              (messageChannelId m)
-              ( def
-                  { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
-                    DR.messageDetailedContent = "",
-                    DR.messageDetailedAllowedMentions = Nothing,
-                    DR.messageDetailedEmbeds = Just [embed]
-                  }
-              )
+      -- EMs
+      let getEMNames game = do
+            ems <- withAppPsqlConn $ Q.getEMs game (dbId sp)
+            pure $ map Q.emName ems
+      emsUsum <- getEMNames USUM
+      emsSwsh <- getEMNames SwSh
+      emsBdsp <- getEMNames BDSP
+      emsSv <- getEMNames SV
+      let makeEmTextIn (ems, game) = "**" <> game <> "** " <> T.intercalate ", " (sort ems)
+      let emText =
+            "### Egg moves\n"
+              <> case filter
+                (not . null . fst)
+                [ (emsUsum, "USUM"),
+                  (emsSwsh, "SwSh"),
+                  (emsBdsp, "BDSP"),
+                  (emsSv, "SV")
+                ] of
+                [] -> "None."
+                emsAndGames -> T.intercalate "\n" (map makeEmTextIn emsAndGames)
+      -- Legality
+      legalities <- getLegality (dbId sp)
+      unbreedable <- withAppPsqlConn $ Q.isPokemonUnbreedable (dbId sp)
+      let legText = "### Legality\n" <> mkLegalityText legalities unbreedable
+      -- Natures
+      suggestedNatures <- getSuggestedNatures (dbId sp)
+      let natureText =
+            "### Suggested natures\n" <> case suggestedNatures of
+              Nothing -> "None."
+              Just sn ->
+                do
+                  case penny sn of
+                    Nothing -> ""
+                    Just n -> "\n**Penny** " <> n
+                  <> case jemmaSwSh sn of
+                    Nothing -> ""
+                    Just n -> "\n**Jemma SwSh** " <> n
+                  <> case jemmaBDSP sn of
+                    Nothing -> ""
+                    Just n -> "\n**Jemma BDSP** " <> n
+                  <> case jemmaG7 sn of
+                    Nothing -> ""
+                    Just n -> "\n**Jemma G7** " <> n
+      -- Put it all together
+      let embed =
+            def
+              { createEmbedTitle = fullName <> " (#" <> tshow (dbNdex sp) <> ")",
+                createEmbedDescription =
+                  T.intercalate
+                    "\n"
+                    [ typingText,
+                      bsText,
+                      grText,
+                      egText,
+                      ecText,
+                      abilText,
+                      emText,
+                      legText,
+                      natureText
+                    ],
+                createEmbedUrl = "https://pokemondb.net/pokedex/" <> (T.replace " " "-" . T.toLower $ dbName sp),
+                createEmbedColor = Just DiscordColorLuminousVividPink
+              }
+      restCall_ $
+        DR.CreateMessageDetailed
+          (messageChannelId m)
+          ( def
+              { DR.messageDetailedReference = Just (def {referenceMessageId = Just (messageId m)}),
+                DR.messageDetailedContent = messagePrefix,
+                DR.messageDetailedAllowedMentions = Nothing,
+                DR.messageDetailedEmbeds = Just [embed]
+              }
+          )
 
 mkLegalityText :: Map Game (Bool, GenLegality) -> Bool -> Text
 mkLegalityText legalities unbreedable =
@@ -708,16 +751,23 @@ respondLegality m mPkmn = withContext ("respondLegality (`" <> messageContent m 
         NoneFoundButSuggesting uniqueNames ->
           replyTo m Nothing $
             T.unwords ["No Pokémon with name '" <> pkmn <> "' found.", parenthesise $ didYouMean uniqueNames]
-        FoundOne spkmn -> do
-          unbreedable <- withAppPsqlConn $ Q.isPokemonUnbreedable (dbId spkmn)
-          let fullName = mkFullName (dbName spkmn) (dbForm spkmn)
-          legalities <- getLegality (dbId spkmn)
-          let message :: Text
-              message =
-                fullName
-                  <> " legality:\n"
-                  <> mkLegalityText legalities unbreedable
-          replyTo m Nothing message
+        AliasedToAndSuggesting sp uniqueNames ->
+          replyWithLegality (guessingYouMeant sp uniqueNames) sp
+        FoundOne sp ->
+          replyWithLegality "" sp
+  where
+    replyWithLegality :: Text -> Q.DBPokemon -> App DiscordHandler ()
+    replyWithLegality messagePrefix spkmn = do
+      unbreedable <- withAppPsqlConn $ Q.isPokemonUnbreedable (dbId spkmn)
+      let fullName = mkFullName (dbName spkmn) (dbForm spkmn)
+      legalities <- getLegality (dbId spkmn)
+      let message :: Text
+          message =
+            messagePrefix
+              <> fullName
+              <> " legality:\n"
+              <> mkLegalityText legalities unbreedable
+      replyTo m Nothing message
 
 respondSprite :: Message -> Maybe Text -> App DiscordHandler ()
 respondSprite m mPkmn = withContext ("respondSprite (`" <> messageContent m <> "`)") $ do
@@ -733,13 +783,59 @@ respondSprite m mPkmn = withContext ("respondSprite (`" <> messageContent m <> "
         NoneFoundButSuggesting uniqueNames ->
           replyTo m Nothing $
             T.unwords ["No Pokémon with name '" <> pkmn <> "' found.", parenthesise $ didYouMean uniqueNames]
-        FoundOne result -> do
-          let pkmnName = dbName result
-              pkmnForm = dbForm result
-          maybeSprite <- getSprites (dbNdex result)
-          case maybeSprite of
-            Nothing -> replyTo m Nothing $ "No sprites found for " <> mkFullName pkmnName pkmnForm <> "."
-            Just sprite -> replyWithImage m ("Sprites for " <> mkFullName pkmnName pkmnForm <> " (or any form with the same Dex number):") sprite
+        AliasedToAndSuggesting result _ ->
+          -- Should not happen (because getPokemonWithSameNdex does not return
+          -- this constructor), but we can safely handle it here anyway
+          replyWithSprite result
+        FoundOne result ->
+          replyWithSprite result
+  where
+    replyWithSprite :: Q.DBPokemon -> App DiscordHandler ()
+    replyWithSprite sp = do
+      let pkmnName = dbName sp
+          pkmnForm = dbForm sp
+      maybeSprite <- getSprites (dbNdex sp)
+      case maybeSprite of
+        Nothing -> replyTo m Nothing $ "No sprites found for " <> mkFullName pkmnName pkmnForm <> "."
+        Just sprite -> replyWithImage m ("Sprites for " <> mkFullName pkmnName pkmnForm <> " (or any form with the same Dex number):") sprite
+
+respondSandwich :: Message -> App DiscordHandler ()
+respondSandwich m =
+  withContext "respondSandwich" $
+    replyTo m Nothing $
+      T.intercalate
+        "\n"
+        [ "**4-star sandwiches**",
+          "NOTE: all members of the Union Circle must make the sandwiches together",
+          "",
+          "6 Hamburger, 2 Cherry Tomatoes",
+          "4 Curry Powder, 4 Marmalade",
+          "",
+          "OR",
+          "",
+          "6 Hamburger, 2 Kiwi",
+          "4 Curry Powder, 1 Vinegar, 3 Cream Cheese",
+          "",
+          "**Sweet sandwich**",
+          "1 Rice",
+          "1 Whipped Cream",
+          "",
+          "**Salty sandwich**",
+          "1 Bacon",
+          "1 Ketchup",
+          "",
+          "**Sour sandwich**",
+          "1 Kiwi",
+          "1 Vinegar",
+          "",
+          "**Bitter sandwich**",
+          "1 Hamburger",
+          "1 Marmalade",
+          "",
+          "**Spicy sandwich**",
+          "1 Jalapeño",
+          "1 Chili Sauce"
+        ]
 
 respondPotluckVotes :: Message -> App DiscordHandler ()
 respondPotluckVotes m = withContext "respondPotluckVotes" $ do

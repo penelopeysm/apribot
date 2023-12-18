@@ -26,6 +26,7 @@ data DiscordCommand
   | CloseThread
   | PotluckVotes
   | PotluckSignup
+  | Sandwich
   | HA (Maybe Text)
   | EM (Maybe Game) (Maybe Text)
   | EMParents (Maybe Game) (Maybe Text)
@@ -49,6 +50,9 @@ potluck1 = PotluckVotes <$ lexeme (C.string' "!potluck1")
 
 potluck2 :: Parser DiscordCommand
 potluck2 = PotluckSignup <$ lexeme (C.string' "!potluck2")
+
+sandwich :: Parser DiscordCommand
+sandwich = Sandwich <$ lexeme (C.string' "!sandwich")
 
 parsePkmnName :: Parser Text
 parsePkmnName = lexeme (takeWhile1P Nothing (const True))
@@ -112,7 +116,8 @@ parser = do
           emParents, -- Must come before `em`
           em,
           sprite,
-          info
+          info,
+          sandwich
         ]
   -- Child parsers don't need eof because there's one here
   eof

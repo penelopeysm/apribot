@@ -115,7 +115,7 @@ getConfig = do
         if cfgOnFly
           then "https://apribot.fly.dev/authorised"
           else "http://localhost:5173/authorised"
-      cfgRedditStreamDelay = 10
+      cfgRedditStreamDelay = 15
   cfgLock <- newMVar ()
   cfgChan <- newChan
 
