@@ -30,9 +30,17 @@ roleCheck = do
           }
   atomically $ T.putStrLn err
 
+-- | WHATEVER YOU LIKE HERE -- This is a playground so that I can make the bot
+-- do funny stuff when running `cabal run apribot -- -r`.
+whatever :: App DiscordHandler ()
+whatever = do
+  -- replyTo2 1143560421467488337 1189681347262951424 "Fallen seine ..."
+  pure ()
+
 -- | Perform the role check and exit
 startup :: App DiscordHandler ()
 startup = do
+  whatever
   let (welcomeChanId, welcomeMsgId) = (mkId 1120783101988180078, mkId 1132810456474595429)
       welcomeEmote = ":cherishball:1132047633658163270"
   -- Get Cherish Ball reacts on main message
@@ -75,3 +83,17 @@ getAllReactions (chanId, msgId) emote timing = do
 
 print' :: Text -> App DiscordHandler ()
 print' = liftIO . T.putStrLn
+
+replyTo2 :: Word64 -> Word64 -> Text -> App DiscordHandler ()
+replyTo2 chanId msgId txt =
+  void $
+    lift $
+      restCall $
+        DR.CreateMessageDetailed
+          (mkId chanId)
+          ( def
+              { DR.messageDetailedReference = Just (def {referenceMessageId = Just (mkId msgId)}),
+                DR.messageDetailedContent = txt,
+                DR.messageDetailedAllowedMentions = Nothing
+              }
+          )

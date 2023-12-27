@@ -27,9 +27,7 @@ RUN git config --global --add safe.directory '*' \
     && cabal update \
     && cabal build
 
-# Copy built files for web server. These two are enough since we don't have any
-# other dependencies. If we have external dependencies then we also need
-# node_modules, see https://kit.svelte.dev/docs/adapter-node
+# Copy built files for web server
 WORKDIR /web
 COPY --from=server-builder ./web/node_modules ./node_modules
 COPY --from=server-builder ./web/build ./build
