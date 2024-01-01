@@ -16,7 +16,7 @@ import Apripsql.Queries (DBPokemon (..), GetPokemonResult (..))
 import qualified Apripsql.Queries as Q
 import Control.Concurrent (forkIO)
 import Control.Concurrent.Chan (readChan, writeChan)
-import Control.Monad (forM, forM_)
+import Control.Monad (forM, forM_, unless)
 import Control.Monad.IO.Class (MonadIO (..))
 import Data.ByteString (ByteString)
 import Data.Char.WCWidth (wcwidth)
@@ -45,7 +45,9 @@ import qualified Setup.EggGroup as EggGroup
 import Setup.Game (Game (..))
 import Setup.GenderRatio (GenderRatio (..))
 import qualified Setup.Type as Type
+import System.Directory (doesFileExist)
 import System.Random (randomRIO)
+import Text.Read (readMaybe)
 import Trans
 import Utils (makeTable)
 
@@ -135,8 +137,35 @@ eventHandler e = withContext "eventHandler" $ do
             Just (Nature pkmnName) -> respondNature m pkmnName
             Just (Legality pkmnName) -> respondLegality m pkmnName
             Just (Sprite pkmnName) -> respondSprite m pkmnName
+            Just TwentyTwentyFour -> respond2024 m
     -- Ignore other events (for now)
     _ -> pure ()
+
+-- | React with either 0 (25% chance), 2 (50% chance), or 4 (25% chance)
+respond2024 :: Message -> App DiscordHandler ()
+respond2024 m = do
+  let fname = "2024.txt"
+  when (messageChannelId m == mkId 1130599509689384963) $ do
+    -- Check if user already participated
+    usersText <- liftIO $ do
+      exists <- doesFileExist fname
+      if exists then T.readFile fname else pure ""
+    let users = map mkId $ mapMaybe (readMaybe . T.unpack) $ T.splitOn "," $ T.strip usersText
+    atomically $ print users
+    unless (userId (messageAuthor m) `elem` users) $ do
+      -- React
+      n <- liftIO $ randomRIO (0 :: Int, 3)
+      let emoji = case n of
+            0 -> ":two:"
+            1 -> ":zero:"
+            2 -> ":two:"
+            3 -> ":four:"
+            _ -> error "wut"
+      restCall_ $ DR.CreateReaction (messageChannelId m, messageId m) emoji
+      -- Add user to list
+      let newUsers = map (unSnowflake . unId) $ users <> [userId (messageAuthor m)]
+          newUsersText = T.intercalate "," $ map tshow newUsers
+      liftIO $ T.writeFile fname newUsersText
 
 -- | This function is exported to allow the Reddit bot to talk to this module.
 -- It adds the post to the MVar, which effectively triggers channelLoop to post

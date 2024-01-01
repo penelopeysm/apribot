@@ -34,6 +34,7 @@ data DiscordCommand
   | Legality (Maybe Text)
   | Sprite (Maybe Text)
   | Info (Maybe Text)
+  | TwentyTwentyFour
   deriving (Eq, Show)
 
 help :: Parser DiscordCommand
@@ -53,6 +54,9 @@ potluck2 = PotluckSignup <$ lexeme (C.string' "!potluck2")
 
 sandwich :: Parser DiscordCommand
 sandwich = Sandwich <$ lexeme (C.string' "!sandwich")
+
+twentytwentyfour :: Parser DiscordCommand
+twentytwentyfour = TwentyTwentyFour <$ lexeme (C.string' "!2024")
 
 parsePkmnName :: Parser Text
 parsePkmnName = lexeme (takeWhile1P Nothing (const True))
@@ -117,7 +121,8 @@ parser = do
           em,
           sprite,
           info,
-          sandwich
+          sandwich,
+          twentytwentyfour
         ]
   -- Child parsers don't need eof because there's one here
   eof
