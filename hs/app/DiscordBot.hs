@@ -115,7 +115,7 @@ eventHandler e = withContext "eventHandler" $ do
         Nothing -> pure ()
     MessageCreate m -> do
       -- Only respond if deployed, or the message is from myself
-      when (cfgOnFly cfg || userId (messageAuthor m) == mkId 236863453443260419) $ do
+      when (cfgOnFly cfg || userId (messageAuthor m) == cfgPennyId cfg) $ do
         let content = T.strip (messageContent m)
         when ("!" `T.isPrefixOf` content) $ do
           let cmd = parseDiscordCommand content

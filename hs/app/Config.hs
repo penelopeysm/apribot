@@ -53,6 +53,8 @@ data Config = Config
     cfgRedirectUri :: Text,
     -- | Path to the Python classifier script.
     cfgClassifierPath :: FilePath,
+    -- | My own Discord user ID
+    cfgPennyId :: UserId,
     -- | Discord token (set via $DISCORD_TOKEN)
     cfgDiscordToken :: Text,
     -- | Discord application ID (set via $DISCORD_ID)
@@ -96,6 +98,8 @@ getConfig = do
   cfgRedditUsername <- T.pack <$> getEnv "REDDIT_USERNAME"
   cfgRedditPassword <- T.pack <$> getEnv "REDDIT_PASSWORD"
   cfgStaticDir <- getDataFileName "static"
+
+  let cfgPennyId = mkId 236863453443260419
 
   cfgClassifierPath <- getDataFileName "python/predict.py"
 

@@ -1,6 +1,7 @@
 module RedditBot (redditBot) where
 
 import Control.Concurrent.Async (concurrently)
+import Control.Exception (SomeException, catch)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
@@ -81,10 +82,28 @@ streamReddit cfg env n subreddit = do
       unwrapReddit = runRedditT env
    in unwrapApp . unwrapReddit $ stream' settings (lift . process) unwrapApp (fetchPosts n subreddit)
 
+tshow :: (Show a) => a -> Text
+tshow = T.pack . show
+
+-- | Restart an IO action on exception (and ping me on Discord with the
+-- exception)
+protect :: Config -> IO () -> IO ()
+protect cfg action =
+  action
+    `catch` ( \(e :: SomeException) -> do
+                let errMsg = "<@" <> tshow (cfgPennyId cfg) <> "> Exception: " <> tshow e
+                runAppWith cfg $ notifyDiscord (Log errMsg)
+                protect cfg action
+            )
+
 -- | Thread to stream Reddit posts and process them
 redditBot :: App IO ()
 redditBot = do
   atomically $ T.putStrLn "Starting Reddit bot..."
   cfg <- ask
   redditEnv <- authenticateAsOwner
-  void $ liftIO $ concurrently (streamReddit cfg redditEnv 50 "pokemontrades") (streamReddit cfg redditEnv 5 "bankballexchange")
+  void $
+    liftIO $
+      concurrently
+        (protect $ streamReddit cfg redditEnv 50 "pokemontrades")
+        (protect $ streamReddit cfg redditEnv 5 "bankballexchange")
