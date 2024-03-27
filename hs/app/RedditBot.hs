@@ -105,5 +105,5 @@ redditBot = do
   void $
     liftIO $
       concurrently
-        (protect $ streamReddit cfg redditEnv 50 "pokemontrades")
-        (protect $ streamReddit cfg redditEnv 5 "bankballexchange")
+        (protect cfg $ streamReddit cfg redditEnv 50 "pokemontrades")
+        (protect cfg $ streamReddit cfg redditEnv 5 "bankballexchange")
