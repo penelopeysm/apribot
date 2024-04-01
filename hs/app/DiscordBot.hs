@@ -136,12 +136,28 @@ eventHandler e = withContext "eventHandler" $ do
             Just (Nature pkmnName) -> respondNature m pkmnName
             Just (Legality pkmnName) -> respondLegality m pkmnName
             Just (Sprite pkmnName) -> respondSprite m pkmnName
-        when (cfgApribotId cfg `elem` map userId (messageMentions m)) $ do
-          liftIO $ T.putStrLn "Apribot was mentioned"
-          response <- runLLM content
-          replyTo m Nothing response
+        when
+          ( cfgApribotId cfg `elem` map userId (messageMentions m)
+              && userId (messageAuthor m) /= cfgApribotId cfg
+          )
+          $ do
+            restCall_ $ DR.TriggerTypingIndicator (messageChannelId m)
+            guildId <- asks cfgAprimarketGuildId
+            userName <- getUserNickFromMessage m (Just guildId)
+            let llmContent = "Message by " <> userName <> ": " <> messageContent m
+            referencedMessageContent <- case messageReferencedMessage m of
+              Nothing -> pure ""
+              Just m2 -> do
+                let content2 = messageContent m2
+                username2 <- getUserNickFromMessage m2 (Just guildId)
+                pure $ "\n\nThis message was posted in response to " <> username2 <> ", who said: " <> content2
+            response <- runLLM $ replaceApriBot $ llmContent <> referencedMessageContent
+            replyTo m Nothing response
     -- Ignore other events (for now)
     _ -> pure ()
+
+replaceApriBot :: Text -> Text
+replaceApriBot = T.replace "<@1130570595176812546>" "@ApriBot"
 
 runLLM :: (MonadIO m) => Text -> App m Text
 runLLM t = do
