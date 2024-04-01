@@ -45,6 +45,7 @@ import qualified Setup.EggGroup as EggGroup
 import Setup.Game (Game (..))
 import Setup.GenderRatio (GenderRatio (..))
 import qualified Setup.Type as Type
+import System.Process (readProcess)
 import System.Random (randomRIO)
 import Trans
 import Utils (makeTable)
@@ -135,8 +136,21 @@ eventHandler e = withContext "eventHandler" $ do
             Just (Nature pkmnName) -> respondNature m pkmnName
             Just (Legality pkmnName) -> respondLegality m pkmnName
             Just (Sprite pkmnName) -> respondSprite m pkmnName
+        when (cfgApribotId cfg `elem` map userId (messageMentions m)) $ do
+          liftIO $ T.putStrLn "Apribot was mentioned"
+          response <- runLLM content
+          replyTo m Nothing response
     -- Ignore other events (for now)
     _ -> pure ()
+
+runLLM :: (MonadIO m) => Text -> App m Text
+runLLM t = do
+  atomically $ T.putStrLn "Running LLM"
+  llmPath <- asks cfgLLMPath
+  result <- liftIO $ T.pack <$> readProcess llmPath [] (T.unpack t)
+  atomically $ T.putStrLn "LLM done"
+  atomically $ T.putStrLn result
+  pure $ T.strip result
 
 -- | This function is exported to allow the Reddit bot to talk to this module.
 -- It adds the post to the MVar, which effectively triggers channelLoop to post
