@@ -141,7 +141,7 @@ eventHandler e = withContext "eventHandler" $ do
             Just (Sprite pkmnName) -> respondSprite m pkmnName
         when
           ( cfgApribotId cfg `elem` map userId (messageMentions m)
-              && userId (messageAuthor m) /= cfgApribotId cfg
+              && userId (messageAuthor m) == cfgPennyId cfg
           )
           $ runLLM m >>= replyTo m Nothing
     -- Ignore other events (for now)
