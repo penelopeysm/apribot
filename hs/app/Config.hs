@@ -53,8 +53,12 @@ data Config = Config
     cfgRedirectUri :: Text,
     -- | Path to the Python classifier script.
     cfgClassifierPath :: FilePath,
+    -- | Path to the Python LLM script.
+    cfgLLMPath :: FilePath,
     -- | My own Discord user ID
     cfgPennyId :: UserId,
+    -- | The bot's own Discord user ID
+    cfgApribotId :: UserId,
     -- | Discord token (set via $DISCORD_TOKEN)
     cfgDiscordToken :: Text,
     -- | Discord application ID (set via $DISCORD_ID)
@@ -100,8 +104,10 @@ getConfig = do
   cfgStaticDir <- getDataFileName "static"
 
   let cfgPennyId = mkId 236863453443260419
+  let cfgApribotId = mkId 1130570595176812546
 
   cfgClassifierPath <- getDataFileName "python/predict.py"
+  cfgLLMPath <- getDataFileName "python/langtest.py"
 
   let cfgAprimarketGuildId = mkId 1120782351811739689
       cfgPtrChannelId = mkId $ if cfgOnFly then 1120783589928345661 else 1132714928810238062

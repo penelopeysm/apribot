@@ -27,6 +27,10 @@ RUN git config --global --add safe.directory '*' \
     && cabal update \
     && cabal build
 
+# Install Python requirements
+WORKDIR /hs/python
+RUN python -m pip install -r requirements.txt
+
 # Copy built files for web server
 WORKDIR /web
 COPY --from=server-builder ./web/node_modules ./node_modules
