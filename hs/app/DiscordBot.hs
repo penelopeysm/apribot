@@ -18,6 +18,7 @@ import Control.Concurrent (forkIO)
 import Control.Concurrent.Chan (readChan, writeChan)
 import Control.Monad (forM, forM_)
 import Control.Monad.IO.Class (MonadIO (..))
+import qualified Data.Aeson as A
 import Data.ByteString (ByteString)
 import Data.Char.WCWidth (wcwidth)
 import Data.List (nub, sort, sortOn)
@@ -31,6 +32,8 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.Text.IO as T
+import qualified Data.Text.Lazy as TL
+import qualified Data.Text.Lazy.Encoding as TL
 import Data.Time.Clock (diffUTCTime, getCurrentTime)
 import Data.Time.Clock.System (getSystemTime, systemSeconds)
 import Data.Word (Word64)
@@ -140,33 +143,9 @@ eventHandler e = withContext "eventHandler" $ do
           ( cfgApribotId cfg `elem` map userId (messageMentions m)
               && userId (messageAuthor m) /= cfgApribotId cfg
           )
-          $ do
-            restCall_ $ DR.TriggerTypingIndicator (messageChannelId m)
-            guildId <- asks cfgAprimarketGuildId
-            userName <- getUserNickFromMessage m (Just guildId)
-            let llmContent = "Message by " <> userName <> ": " <> messageContent m
-            referencedMessageContent <- case messageReferencedMessage m of
-              Nothing -> pure ""
-              Just m2 -> do
-                let content2 = messageContent m2
-                username2 <- getUserNickFromMessage m2 (Just guildId)
-                pure $ "\n\nThis message was posted in response to " <> username2 <> ", who said: " <> content2
-            response <- runLLM $ replaceApriBot $ llmContent <> referencedMessageContent
-            replyTo m Nothing response
+          $ runLLM m >>= replyTo m Nothing
     -- Ignore other events (for now)
     _ -> pure ()
-
-replaceApriBot :: Text -> Text
-replaceApriBot = T.replace "<@1130570595176812546>" "@ApriBot"
-
-runLLM :: (MonadIO m) => Text -> App m Text
-runLLM t = do
-  atomically $ T.putStrLn "Running LLM"
-  llmPath <- asks cfgLLMPath
-  result <- liftIO $ T.pack <$> readProcess llmPath [] (T.unpack t)
-  atomically $ T.putStrLn "LLM done"
-  atomically $ T.putStrLn result
-  pure $ T.strip result
 
 -- | This function is exported to allow the Reddit bot to talk to this module.
 -- It adds the post to the MVar, which effectively triggers channelLoop to post
@@ -1168,6 +1147,55 @@ addRole maybeGuildId uid emoji =
             restCall_ $ DR.RemoveGuildMemberRole gid uid rid'
           restCall_ $ DR.AddGuildMemberRole gid uid rid
         Nothing -> pure ()
+
+-- * LLM bits
+
+replaceApriBot :: Text -> Text
+replaceApriBot = T.replace "<@1130570595176812546>" "@ApriBot"
+
+discordMessageToJson :: Message -> App DiscordHandler (Map Text Text)
+discordMessageToJson m = do
+  apribotId <- asks cfgApribotId
+  guildId <- asks cfgAprimarketGuildId
+  if userId (messageAuthor m) == apribotId
+    then pure $ M.fromList [("role", "assistant"), ("content", replaceApriBot (messageContent m))]
+    else do
+      userNick <- getUserNickFromMessage m (Just guildId)
+      pure $ M.fromList [("role", "user"), ("name", userNick), ("content", messageContent m)]
+
+runLLM :: Message -> App DiscordHandler Text
+runLLM m = do
+  restCall_ $ DR.TriggerTypingIndicator (messageChannelId m)
+
+  -- Construct reply chain
+  let makeChain :: Message -> App DiscordHandler [Map Text Text]
+      makeChain = fmap reverse . makeChain' []
+        where
+          makeChain' ct msg =
+            -- Cut off context at 5 messages
+            if length ct == 5
+              then pure ct
+              else do
+                thisContent <- discordMessageToJson msg
+                restOfContent <- case messageReferencedMessage msg of
+                  Nothing -> pure []
+                  Just msg' -> do
+                    -- Need to perform an API call to get the full message, because
+                    -- referenced messages do not contain their own reference
+                    fullMsg' <- lift $ restCall $ DR.GetChannelMessage (messageChannelId msg', messageId msg')
+                    case fullMsg' of
+                      Left e -> do
+                        tellError e
+                        pure []
+                      Right msg'' -> makeChain' (thisContent : ct) msg''
+                pure $ thisContent : restOfContent
+
+  -- Construct JSON and send it to Python script
+  json <- TL.unpack . TL.decodeUtf8 . A.encode <$> makeChain m
+  atomically $ T.putStrLn $ T.pack json
+  llmPath <- asks cfgLLMPath
+  result <- liftIO $ T.pack <$> readProcess llmPath [] json
+  pure $ T.strip result
 
 -- * Helper functions
 
