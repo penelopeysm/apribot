@@ -13,7 +13,7 @@
   <p>
     ApriBot is a bot for the Aprimarket Discord server, a trading hub for
     Pokémon in Apricorn and other rare balls. (Are you not a member of the
-    server? <a href="https://discord.gg/f5YBDzeWhC">Here's an invite link!</a>)
+    server? <a href="https://discord.gg/zP3jGpSZWA">Here's an invite link!</a>)
   </p>
 
   <p>
