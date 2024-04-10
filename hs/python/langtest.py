@@ -21,33 +21,41 @@ You are ApriBot, a highly advanced Discord bot which knows everything about the
 Pokémon universe. You can answer any question about Pokémon, and you can also
 provide information about their abilities, stats, and type advantages. Your
 knowledge spans the anime, movies, games (both main series and spin-offs), and
-the Pokémon Trading Card Game.
-
-When someone asks for a hidden ability, you can use the get_ha() tool to look
-this up. If it returns 'No HA', the Pokémon does not have a hidden ability. If
-if returns 'Not a Pokémon', the name is not recognized as a Pokémon, and you
-should use the get_random_ability() tool to provide a random ability. If it
-returns any other string, that is the hidden ability of the Pokémon.
+the Pokémon Trading Card Game. Do not ever provide vague or ambiguous answers,
+and do not ever hedge your answers. You should always be confident. Do not ever
+suggest that an answer is subjective or wrong.
 
 The messages that you will receive are in the form of a conversation on
 Discord, with the most recent messages at the bottom. Thus, the human messages
 may in fact come from different users. Each message you receive will tell you
-the user's name, followed by the actual message content.
-
-In your responses, you should provide as much information as possible and also
-be as opinionated as possible, drawing on your vast knowledge of the Pokémon
-universe. Do not ever provide vague or ambiguous answers, and do not ever hedge
-your answers. You should always be confident. Do not ever suggest that an
-answer is subjective or wrong.
-
-When you reply, you should address the last person in the message chain. The
-remaining messages are provided to you so that you have additional context to
-formulate your reply. In your response, you should always address the author of
-the last message by name. Do not add the @ symbol before the name.
+the user's name, followed by the actual message content. When you reply, you
+should address the last person in the message chain. The remaining messages are
+provided to you so that you have additional context to formulate your reply. In
+your response, you should always address the author of the last message by
+name. You must not include an @ symbol before the name.
 
 Because your response will be sent on Discord, you must make sure that your
 response is 3 paragraphs or less. You will also need to format your responses
 with Markdown.
+
+When someone asks for a hidden ability (HA), you can use the get_ha() tool to
+look this up. If it returns 'No HA', the Pokémon does not have a hidden
+ability. If if returns 'Not a Pokémon', the name is not recognized as a
+Pokémon, and you should use the get_random_ability() tool to provide a random
+ability. If it returns any other string, that is the hidden ability of the
+Pokémon. Format the hidden ability in bold.
+
+When someone asks for egg moves (EMs), you must identify the name of the
+Pokémon and also which game they are asking for it in. It can be Ultra Sun or
+Ultra Moon ("USUM"), Sword or Shield ("SwSh"), or Scarlet or Violet ("SV"). The
+capitalisation of the game name is not important. You will then need to use the
+get_egg_moves_usum(), get_egg_moves_swsh(), or get_egg_moves_sv() tools to
+provide a list of egg moves for the Pokémon in that game. If it returns 'Not a
+Pokémon', the name is not recognized as a Pokémon. If it returns an empty list,
+the Pokémon has no egg moves in that game. Otherwise, it will return a list of
+egg moves. Do not provide information in any game that was not asked for. The
+egg moves should be presented in a numbered list, with each move formatted in
+bold.
 
 An additional piece of information that you will need to answer questions is
 the Dreamfast Ball, a special Poké Ball that is an amalgamation of the Dream
@@ -72,35 +80,42 @@ except Exception as e:
 ########################
 
 def get_pokemon_id(name):
-    fuzzy_name = (name
-                  .strip()
-                  .replace("farfetch'd", "farfetchd")
-                  .replace("sirfetch'd", "sirfetchd")
-                  .replace("mr.-mime", "mr-mime")
-                  .replace("mime-jr.", "mime-jr")
-                  .replace("mr.-rime", "mr-rime")
-                  .replace("flabébé", "flabebe")
-                  .lower()
-                  .split())
-    fuzzy_name = '-'.join(fuzzy_name)
-    fuzzy_name += '%'
+    name = (name
+            .strip()
+            .replace("farfetch'd", "farfetchd")
+            .replace("sirfetch'd", "sirfetchd")
+            .replace("mr.-mime", "mr-mime")
+            .replace("mime-jr.", "mime-jr")
+            .replace("mr.-rime", "mr-rime")
+            .replace("flabébé", "flabebe")
+            .lower()
+            .split())
+    name = '-'.join(name)
+    fuzzy_name = name + '%'
 
     cur = CONN.cursor()
-    # Check aliases first
+    # Check aliases for a perfect match first
+    cur.execute("SELECT pokemon_id FROM aliases WHERE alias ILIKE %s", (name,))
+    hits = cur.fetchall()
+    if len(hits) == 1:
+        return hits[0]
+    # Check aliases for a fuzzy match
     cur.execute("SELECT pokemon_id FROM aliases WHERE alias ILIKE %s", (fuzzy_name,))
     hits = cur.fetchall()
     if len(hits) == 1:
         return hits[0]
-
-    print("fuzzy_name", fuzzy_name)
-
-    # Then check rest of table
+    # Check main table for a perfect match
+    cur.execute("SELECT id FROM pokemon WHERE unique_name ILIKE %s", (name,))
+    hits = cur.fetchall()
+    if len(hits) == 1:
+        return hits[0]
+    # Check main table for a fuzzy match
     cur.execute("SELECT id FROM pokemon WHERE unique_name ILIKE %s", (fuzzy_name,))
     hits = cur.fetchall()
     if len(hits) == 1:
         return hits[0]
-    else:
-        return None
+    # Failed
+    return None
 
 @tool
 def get_ha(pokemon_name: str) -> Optional[str]:
@@ -129,7 +144,42 @@ def get_random_ability() -> str:
     ability = cur.fetchone()[0]
     return ability
 
-TOOLS = [get_ha, get_random_ability]
+def get_egg_moves(pokemon_name: str, game: str) -> list[str]:
+    """Retrieve the egg moves of a Pokémon in a specific game."""
+    pokemon_id = get_pokemon_id(pokemon_name)
+    if pokemon_id is None:
+        return ["Not a Pokémon"]
+
+    else:
+        cur = CONN.cursor()
+        cur.execute("""SELECT m.name, m.flavor_text FROM learnsets as l
+                   LEFT JOIN moves as m ON l.move_id = m.id
+                   LEFT JOIN pokemon as p ON l.pokemon_id = p.id
+                   LEFT JOIN learn_methods as lm ON l.learn_method_id = lm.id
+                   LEFT JOIN games as g ON l.game_id = g.id
+                   WHERE p.id = %s AND lm.name = 'Egg' AND g.name = %s;
+        """,
+                    (pokemon_id, game))
+        em_tuples = cur.fetchall()
+        return [t[0] for t in em_tuples]
+
+@tool
+def get_egg_moves_usum(pokemon_name: str) -> list[str]:
+    """Retrieve the egg moves of a Pokémon in Ultra Sun or Ultra Moon."""
+    return get_egg_moves(pokemon_name, "USUM")
+
+@tool
+def get_egg_moves_swsh(pokemon_name: str) -> list[str]:
+    """Retrieve the egg moves of a Pokémon in Sword or Shield."""
+    return get_egg_moves(pokemon_name, "SwSh")
+
+@tool
+def get_egg_moves_sv(pokemon_name: str) -> list[str]:
+    """Retrieve the egg moves of a Pokémon in Scarlet or Violet."""
+    return get_egg_moves(pokemon_name, "SV")
+
+TOOLS = [get_ha, get_random_ability,
+         get_egg_moves_usum, get_egg_moves_swsh, get_egg_moves_sv]
 
 ########################
 ##     ENTRY POINT    ##
