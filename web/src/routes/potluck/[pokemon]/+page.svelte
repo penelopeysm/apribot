@@ -32,7 +32,7 @@
 
     function setHighlighted(
         usernameRow: string | null,
-        usernameCol: string | null
+        usernameCol: string | null,
     ) {
         if (usernameRow === null) {
             highlightedRow = null;
@@ -59,7 +59,7 @@
 </script>
 
 <svelte:head>
-    <title>ApriBot :: {data.pokemonName}</title>
+    <title>ApriBot :: Potlucks :: {data.pokemonName}</title>
 </svelte:head>
 <h1>{data.pokemonName} Potluck ({showDate(data.date)})</h1>
 
@@ -69,191 +69,207 @@
 </p>
 
 <p>
-    This potluck round features {tableData.length} participants and {countTotalTrades(tableData)} trades.
+    This potluck round features {tableData.length} participants and {countTotalTrades(
+        tableData,
+    )} trades.
 </p>
 
-<table>
-    <thead>
-        <tr>
-            <td />
-            <td />
-            <td />
-            <th colspan={users.length}>Receiving</th>
-        </tr>
-    </thead>
-    <tbody>
-        <tr>
-            <td />
-            <th>Ball</th>
-            <th>Username</th>
-            {#each users as user}
-                <td
-                    class="clickable rotated"
-                    class:highlighted={user === highlightedCol}
-                    on:mouseover={() => {
-                        setHighlighted(user, user);
-                    }}
-                    on:mouseout={() => {
-                        setHighlighted(null, null);
-                    }}
-                    on:focus={() => {
-                        setHighlighted(user, user);
-                    }}
-                    on:blur={() => {
-                        setHighlighted(null, null);
-                    }}
-                    on:click={() => {
-                        clickedUser = user;
-                    }}><div>{user}</div></td
-                >
-            {/each}
-            <th style="width:min-content">Total sending</th>
-        </tr>
-        {#each tableData as tableRow, i}
+<div id="table-container">
+    <table>
+        <thead>
             <tr>
-                {#if i === 0}
-                    <th rowspan={tableData.length} class="rotated"
-                        ><div>Sending</div></th
-                    >
-                {/if}
-                <td
-                    on:mouseover={() => {
-                        setHighlighted(tableRow.username, tableRow.username);
-                    }}
-                    on:mouseout={() => {
-                        setHighlighted(null, null);
-                    }}
-                    on:focus={() => {
-                        setHighlighted(tableRow.username, tableRow.username);
-                    }}
-                    on:blur={() => {
-                        setHighlighted(null, null);
-                    }}
-                    on:click={() => {
-                        clickedUser = tableRow.username;
-                    }}
-                    class="clickable"
-                    class:highlighted={tableRow.username === highlightedRow}
-                    >{tableRow.ball}</td
-                >
-                <td
-                    on:mouseover={() => {
-                        setHighlighted(tableRow.username, tableRow.username);
-                    }}
-                    on:mouseout={() => {
-                        setHighlighted(null, null);
-                    }}
-                    on:focus={() => {
-                        setHighlighted(tableRow.username, tableRow.username);
-                    }}
-                    on:blur={() => {
-                        setHighlighted(null, null);
-                    }}
-                    on:click={() => {
-                        clickedUser = tableRow.username;
-                    }}
-                    class="clickable horizontal-name"
-                    class:highlighted={tableRow.username === highlightedRow}
-                    >{tableRow.username}</td
-                >
-                {#each tableRow.giving as giving, j}
+                <td />
+                <td />
+                <td />
+                <th colspan={users.length}>Receiving</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td />
+                <th>Ball</th>
+                <th>Username</th>
+                {#each users as user}
                     <td
+                        class="clickable rotated"
+                        class:highlighted={user === highlightedCol}
                         on:mouseover={() => {
-                            if (giving)
-                                setHighlighted(tableRow.username, users[j]);
+                            setHighlighted(user, user);
                         }}
                         on:mouseout={() => {
                             setHighlighted(null, null);
                         }}
                         on:focus={() => {
-                            if (giving)
-                                setHighlighted(tableRow.username, users[j]);
+                            setHighlighted(user, user);
                         }}
                         on:blur={() => {
                             setHighlighted(null, null);
                         }}
-                        class="constrained"
-                        class:highlighted={tableRow.username ===
-                            highlightedRow || users[j] === highlightedCol}
-                        class:greyed={i === j}
+                        on:click={() => {
+                            clickedUser = user;
+                        }}><div>{user}</div></td
                     >
-                        {#if giving}
-                            <BallImage ball={tableRow.ball} />
-                        {/if}
-                    </td>
                 {/each}
-                <td
-                    class="strong middle"
-                    on:mouseover={() => {
-                        setHighlighted(tableRow.username, null);
-                    }}
-                    on:mouseout={() => {
-                        setHighlighted(null, null);
-                    }}
-                    on:focus={() => {
-                        setHighlighted(tableRow.username, null);
-                    }}
-                    on:blur={() => {
-                        setHighlighted(null, null);
-                    }}
-                    class:highlighted={tableRow.username === highlightedRow}
-                    >{tableRow.giving.filter(Boolean).length}</td
-                >
+                <th style="width:min-content">Total sending</th>
             </tr>
-        {/each}
-        <tr>
-            <td />
-            <th>Ball</th>
-            <th>Username</th>
-            {#each users as user}
-                <td
-                    class="clickable rotated"
-                    class:highlighted={user === highlightedCol}
-                    on:mouseover={() => {
-                        setHighlighted(user, user);
-                    }}
-                    on:mouseout={() => {
-                        setHighlighted(null, null);
-                    }}
-                    on:focus={() => {
-                        setHighlighted(user, user);
-                    }}
-                    on:blur={() => {
-                        setHighlighted(null, null);
-                    }}
-                    on:click={() => {
-                        clickedUser = user;
-                    }}><div>{user}</div></td
-                >
+            {#each tableData as tableRow, i}
+                <tr>
+                    {#if i === 0}
+                        <th rowspan={tableData.length} class="rotated"
+                            ><div>Sending</div></th
+                        >
+                    {/if}
+                    <td
+                        on:mouseover={() => {
+                            setHighlighted(
+                                tableRow.username,
+                                tableRow.username,
+                            );
+                        }}
+                        on:mouseout={() => {
+                            setHighlighted(null, null);
+                        }}
+                        on:focus={() => {
+                            setHighlighted(
+                                tableRow.username,
+                                tableRow.username,
+                            );
+                        }}
+                        on:blur={() => {
+                            setHighlighted(null, null);
+                        }}
+                        on:click={() => {
+                            clickedUser = tableRow.username;
+                        }}
+                        class="clickable"
+                        class:highlighted={tableRow.username === highlightedRow}
+                        >{tableRow.ball}</td
+                    >
+                    <td
+                        on:mouseover={() => {
+                            setHighlighted(
+                                tableRow.username,
+                                tableRow.username,
+                            );
+                        }}
+                        on:mouseout={() => {
+                            setHighlighted(null, null);
+                        }}
+                        on:focus={() => {
+                            setHighlighted(
+                                tableRow.username,
+                                tableRow.username,
+                            );
+                        }}
+                        on:blur={() => {
+                            setHighlighted(null, null);
+                        }}
+                        on:click={() => {
+                            clickedUser = tableRow.username;
+                        }}
+                        class="clickable horizontal-name"
+                        class:highlighted={tableRow.username === highlightedRow}
+                        >{tableRow.username}</td
+                    >
+                    {#each tableRow.giving as giving, j}
+                        <td
+                            on:mouseover={() => {
+                                if (giving)
+                                    setHighlighted(tableRow.username, users[j]);
+                            }}
+                            on:mouseout={() => {
+                                setHighlighted(null, null);
+                            }}
+                            on:focus={() => {
+                                if (giving)
+                                    setHighlighted(tableRow.username, users[j]);
+                            }}
+                            on:blur={() => {
+                                setHighlighted(null, null);
+                            }}
+                            class="constrained"
+                            class:highlighted={tableRow.username ===
+                                highlightedRow || users[j] === highlightedCol}
+                            class:greyed={i === j}
+                        >
+                            {#if giving}
+                                <BallImage ball={tableRow.ball} />
+                            {/if}
+                        </td>
+                    {/each}
+                    <td
+                        class="strong middle"
+                        on:mouseover={() => {
+                            setHighlighted(tableRow.username, null);
+                        }}
+                        on:mouseout={() => {
+                            setHighlighted(null, null);
+                        }}
+                        on:focus={() => {
+                            setHighlighted(tableRow.username, null);
+                        }}
+                        on:blur={() => {
+                            setHighlighted(null, null);
+                        }}
+                        class:highlighted={tableRow.username === highlightedRow}
+                        >{tableRow.giving.filter(Boolean).length}</td
+                    >
+                </tr>
             {/each}
+            <tr>
+                <td />
+                <th>Ball</th>
+                <th>Username</th>
+                {#each users as user}
+                    <td
+                        class="clickable rotated"
+                        class:highlighted={user === highlightedCol}
+                        on:mouseover={() => {
+                            setHighlighted(user, user);
+                        }}
+                        on:mouseout={() => {
+                            setHighlighted(null, null);
+                        }}
+                        on:focus={() => {
+                            setHighlighted(user, user);
+                        }}
+                        on:blur={() => {
+                            setHighlighted(null, null);
+                        }}
+                        on:click={() => {
+                            clickedUser = user;
+                        }}><div>{user}</div></td
+                    >
+                {/each}
                 <td></td>
-        </tr>
-        <tr>
-            <td />
-            <th colspan="2">Total receiving</th>
-            {#each tableData as tableRow, j}
-                <td
-                    class="strong middle"
-                    on:mouseover={() => {
-                        setHighlighted(null, tableRow.username);
-                    }}
-                    on:mouseout={() => {
-                        setHighlighted(null, null);
-                    }}
-                    on:focus={() => {
-                        setHighlighted(null, tableRow.username);
-                    }}
-                    on:blur={() => {
-                        setHighlighted(null, null);
-                    }}
-                    class:highlighted={tableRow.username === highlightedCol}
-                    >{tableData.filter((row) => row.giving[j]).length}</td
-                >
-            {/each}
-            <td />
-        </tr></tbody
-    >
-</table>
+            </tr>
+            <tr>
+                <td />
+                <th colspan="2">Total receiving</th>
+                {#each tableData as tableRow, j}
+                    <td
+                        class="strong middle"
+                        on:mouseover={() => {
+                            setHighlighted(null, tableRow.username);
+                        }}
+                        on:mouseout={() => {
+                            setHighlighted(null, null);
+                        }}
+                        on:focus={() => {
+                            setHighlighted(null, tableRow.username);
+                        }}
+                        on:blur={() => {
+                            setHighlighted(null, null);
+                        }}
+                        class:highlighted={tableRow.username === highlightedCol}
+                        >{tableData.filter((row) => row.giving[j]).length}</td
+                    >
+                {/each}
+                <td />
+            </tr></tbody
+        >
+    </table>
+</div>
 
 {#if clickedUser !== null}
     <ClickedUser bind:clickedUser {tableData} />
@@ -262,6 +278,12 @@
 <style>
     :root {
         --max-name-size: 135px;
+    }
+
+    @media (max-width: 800px) {
+        div#table-container {
+            overflow-x: auto;
+        }
     }
 
     table {

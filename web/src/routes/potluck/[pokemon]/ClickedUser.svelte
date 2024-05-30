@@ -11,7 +11,7 @@
 
     let users: string[] = tableData.map((x) => x.username);
     let clickedUserRow: TableRow = tableData.find(
-        (x) => x.username === clickedUser
+        (x) => x.username === clickedUser,
     ) as TableRow; // assert that there is always a clickedUserRow
 
     // Calculate whom you're giving to
@@ -41,6 +41,23 @@
                 "Copy to clipboard (in Discord-compatible form)";
         }, 1000);
     }
+
+    // Disable scrolling when the popup is open
+    // https://css-tricks.com/prevent-page-scrolling-when-a-modal-is-open/
+    import { onMount, onDestroy } from "svelte";
+    onMount(() => {
+        document.body.style.position = "fixed";
+        document.body.style.top = `-${window.scrollY}px`;
+        // TODO: For some reason this is always 0px
+        console.log("mount", document.body.style.top);
+    });
+    onDestroy(() => {
+        console.log("destroy", document.body.style.top);
+        const scrollY = document.body.style.top;
+        document.body.style.position = "";
+        document.body.style.top = "";
+        window.scrollTo(0, parseInt(scrollY || "0") * -1);
+    });
 </script>
 
 <button on:click={() => (clickedUser = null)}><div id="cover" /></button>
@@ -97,8 +114,10 @@
     div#popup {
         position: fixed;
         width: 450px;
+        max-width: 95vw;
         left: 50%;
         top: 10vh;
+        height: max-content;
         max-height: 80vh;
         transform: translate(-50%, 0);
         background-color: #aec6f2;
@@ -125,5 +144,9 @@
         border-radius: 5px;
         background-color: #ddd;
         box-shadow: 1px 1px 1px rgba(0, 0, 0, 0.5);
+    }
+
+    div#popup button:hover {
+        background-color: #ccc;
     }
 </style>
