@@ -34,13 +34,7 @@
     let copyButton: HTMLButtonElement;
     let discordText: string;
     function copyTextToClipboard() {
-        // Copy to clipboard
-        const el = document.createElement("textarea");
-        el.value = discordText.trim();
-        document.body.appendChild(el);
-        el.select();
-        document.execCommand("copy");
-        document.body.removeChild(el);
+        navigator.clipboard.writeText(discordText.trim());
         copyButton.textContent = "Copied!";
         setTimeout(() => {
             copyButton.textContent =
