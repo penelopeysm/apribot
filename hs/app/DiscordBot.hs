@@ -142,6 +142,7 @@ eventHandler e = withContext "eventHandler" $ do
         when
           ( cfgApribotId cfg `elem` map userId (messageMentions m)
               && userId (messageAuthor m) == cfgPennyId cfg
+              && messageChannelId m /= cfgR2DChannelId cfg
           )
           $ runLLM m >>= replyTo m Nothing
     -- Ignore other events (for now)

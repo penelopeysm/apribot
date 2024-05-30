@@ -33,6 +33,8 @@ data Config = Config
     cfgPtrChannelId :: ChannelId,
     -- | Discord channel to post /r/bankballexchange posts to.
     cfgBbeChannelId :: ChannelId,
+    -- | Discord channel for R2D
+    cfgR2DChannelId :: ChannelId,
     -- | Discord channel to create trade overflow threads in
     cfgTradeOverflowChannelId :: ChannelId,
     -- | Message to monitor for role reactions
@@ -117,6 +119,7 @@ getConfig = do
       cfgPotluckSignupChannelId = mkId 1144082624613204029
       cfgLogChannelId = mkId 1132000877415247903
       cfgDebugChannelId = mkId 1179134931461480519
+      cfgR2DChannelId = mkId 1196157634223542282
       -- Disabled for now
       cfgRoleReactionsMessageId = Nothing
       cfgPort = 8080
