@@ -1173,8 +1173,8 @@ runLLM m = do
       makeChain = fmap reverse . makeChain' []
         where
           makeChain' ct msg =
-            -- Cut off context at 8 messages
-            if length ct == 8
+            -- Cut off context at 1 message (increase this to pass more context)
+            if length ct == 1
               then pure ct
               else do
                 thisContent <- discordMessageToJson msg
