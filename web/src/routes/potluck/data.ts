@@ -1202,3 +1202,24 @@ Beast,EarthwormB,0,0,1,0,1,0,1,1,1,0,0,0,1,0,1,0,1,1,0
     pokemonName: 'Skiddo',
     date: new Date("2024-09-18"),
 });
+
+potluckData.set('carbink', {
+    csv: `
+Beast,EarthwormB,0,0,1,1,1,0,0,0,0,0,0,0,0,0
+Dream,erin,1,0,1,1,1,0,0,1,1,1,0,1,0,0
+Fast,hal,0,1,0,1,1,0,0,1,1,0,0,0,0,0
+Friend,JelloPie,0,1,0,0,0,0,0,1,0,0,0,0,0,0
+Heavy,jang808,0,1,1,1,0,0,0,0,1,0,0,0,0,0
+Level,DeltaRouge,1,1,1,0,0,0,0,0,0,0,0,0,0,0
+Level,FreckleSketches,0,0,0,1,0,0,0,1,0,1,0,1,0,0
+Love,161StreetBD4,1,1,0,1,0,0,0,0,0,0,0,0,0,0
+Lure,Komezu,0,1,0,1,1,0,0,1,0,1,0,1,0,0
+Moon,TheWeirdSoul,0,0,1,1,1,0,1,0,1,0,0,1,0,0
+Safari,Eevee918,1,0,1,1,0,0,0,1,0,0,0,0,0,0
+Safari,Keldeo,0,1,0,0,0,0,1,0,1,0,0,0,0,1
+Sport,Natto,0,1,1,0,0,0,0,0,1,0,0,0,0,0
+Sport,theremuslupins,1,0,0,1,0,0,0,1,0,0,0,1,0,0
+`,
+    pokemonName: 'Carbink',
+    date: new Date("2024-09-25"),
+});
