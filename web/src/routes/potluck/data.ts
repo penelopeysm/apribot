@@ -1304,3 +1304,49 @@ Sport,TheWeirdSoul,1,0,0,1,0,0,1,0,0,0,0,0,0,0,0,1,1,0,0,0
     pokemonName: 'Spoink',
     date: new Date("2024-10-16"),
 });
+
+potluckData.set('chinchou', {
+    csv: `
+Moon,erin,0,0,1,0,0,0,1,1,0,1,1,1,0,0,0,0
+Love,katsup,1,0,1,0,1,0,1,1,0,0,0,0,0,0,0,0
+Beast,GreenSkyDragon,0,0,0,0,0,0,1,1,1,1,1,1,0,0,0,0
+Fast,JelloPie,1,0,1,0,1,0,1,0,0,1,1,1,0,0,0,0
+Dream,TheWeirdSoul,0,1,1,0,0,0,0,1,1,1,1,1,0,0,0,0
+Level,coldsnapper1995,0,0,1,0,1,0,1,1,0,0,0,0,0,0,0,0
+Safari,Eevee918,1,0,1,1,1,0,0,1,0,0,0,0,0,0,0,0
+Sport,hal,1,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0
+Heavy,EarthwormB,1,0,1,0,1,0,1,1,0,1,1,1,0,0,0,0
+Friend,jang808,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0
+Lure,Komezu,1,0,1,0,1,0,1,1,0,1,0,1,0,0,0,0
+Friend,theremuslupins,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0
+Safari,Scrambled,0,0,0,0,0,0,0,0,1,1,1,1,0,0,0,0
+Sport,FreckleSketches,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0
+Love,cv,0,0,0,0,0,0,0,0,1,1,1,1,0,0,0,0
+Level,waldsaum,1,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0
+`,
+    pokemonName: 'Chinchou',
+    date: new Date("2024-10-23"),
+});
+
+potluckData.set('hatenna', {
+    csv: `
+Beast,jang808,0,0,1,0,0,0,1,0,0,1,1,1,0,1,1,0
+Dream,Eevee918(1),0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0
+Fast,theremuslupins,1,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0
+Fast,sachi,0,0,1,0,0,1,0,1,0,0,1,1,0,1,0,0
+Friend,cv,1,0,1,0,0,0,0,0,0,1,1,0,0,0,0,0
+Friend,Komezu,0,0,0,1,0,0,1,0,0,1,1,1,0,1,1,0
+Heavy,TacitusVikram,1,0,1,0,0,1,0,0,0,0,1,1,0,1,1,0
+Level,coldsnapper1995,1,0,0,1,0,0,1,0,0,1,0,0,0,1,0,0
+Level,FreckleSketches,0,0,1,0,0,1,0,0,0,0,1,1,0,0,0,0
+Love,erin,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0
+Lure,161StreetBD4,1,0,0,1,0,0,1,0,0,1,0,1,0,0,1,0
+Moon,Ame,1,0,0,1,0,1,1,0,0,0,1,0,0,1,0,0
+Safari,Eevee918(2),0,0,1,0,0,0,0,0,0,1,0,0,0,0,1,0
+Safari,hal,0,0,0,1,0,1,1,0,0,0,1,0,0,0,0,0
+Sport,EarthwormB,1,0,0,0,0,1,1,0,0,0,1,0,0,0,0,0
+Sport,Waldsaum,0,0,1,1,0,0,0,0,0,1,0,1,0,0,0,0
+`,
+    pokemonName: 'Hatenna',
+    date: new Date("2024-11-06"),
+});
