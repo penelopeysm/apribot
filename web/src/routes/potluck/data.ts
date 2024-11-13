@@ -1350,3 +1350,24 @@ Sport,Waldsaum,0,0,1,1,0,0,0,0,0,1,0,1,0,0,0,0
     pokemonName: 'Hatenna',
     date: new Date("2024-11-06"),
 });
+
+potluckData.set('impidimp', {
+    csv: `
+Beast,sachi,0,0,1,0,1,1,0,0,0,0,0,0,0,0
+Dream,161StreetBD4,1,0,1,1,1,0,0,1,0,1,0,0,0,0
+Fast,TacitusVikram,1,1,0,1,1,1,1,1,0,1,0,1,0,0
+Friend,Ame,1,1,1,0,1,0,1,1,0,0,0,1,0,0
+Heavy,hal,1,1,1,1,0,1,0,0,0,1,0,0,0,0
+Level,Komezu,1,1,1,0,0,0,1,1,0,1,0,0,0,0
+Love,erin,1,1,1,1,1,0,0,1,0,1,0,0,0,0
+Lure,jang808,0,1,1,1,0,0,1,0,0,0,0,0,0,0
+Lure,katsup,1,0,0,0,1,0,0,0,0,1,0,0,0,1
+Moon,theremuslupins,1,1,1,0,1,0,0,0,0,0,0,0,0,0
+Safari,Eevee918,1,0,0,0,1,0,1,0,0,1,0,0,0,0
+Safari,FreckleSketches,0,1,1,1,0,0,0,0,0,0,0,0,0,1
+Sport,Rune,0,1,1,0,0,0,1,0,0,1,0,0,0,0
+Sport,TheWeirdSoul,1,0,0,1,0,1,0,0,0,0,0,1,0,0
+`,
+    pokemonName: 'Impidimp',
+    date: new Date("2024-11-13"),
+});
