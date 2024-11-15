@@ -4,3 +4,4 @@ hs/dist-newstyle
 hs/python/venv
 web/node_modules
 hs/cabal.project.local
+.DS_Store
