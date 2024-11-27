@@ -1394,3 +1394,23 @@ Sport,Scrambled,0,0,0,1,0,1,1,0,0,0,1,0,0,0,0,0
     pokemonName: 'Croagunk',
     date: new Date("2024-11-20"),
 });
+
+potluckData.set('snubbull', {
+    csv: `
+Beast,Katsup,0,1,1,0,1,1,0,1,1,0,0,0,0
+Dream,erin,0,0,1,0,1,0,0,1,1,0,0,0,0
+Fast,hal,0,1,0,0,0,1,1,0,1,0,0,0,0
+Friend,cv,0,0,1,0,0,1,0,1,0,0,0,0,0
+Friend,sachi,0,1,0,0,0,0,1,0,1,1,0,0,0
+Heavy,jang808,0,1,1,0,0,0,1,1,1,0,0,0,0
+Level,TheWeirdSoul,0,1,1,0,0,1,0,1,1,1,0,0,0
+Love,theremuslupins,1,1,1,0,0,0,0,0,1,0,0,0,0
+Lure,Komezu,1,1,0,0,1,0,1,1,0,1,0,0,0
+Moon,FreckleSketches,0,0,0,0,1,0,1,0,1,0,0,0,0
+Moon,Scrambled,0,1,1,0,0,0,0,1,0,0,0,0,0
+Safari,Eevee918,0,1,1,0,1,1,1,1,1,0,0,0,0
+Sport,waldsaum,0,1,1,0,1,1,1,1,1,0,0,0,0
+`,
+    pokemonName: 'Snubbull',
+    date: new Date("2024-11-27"),
+});
