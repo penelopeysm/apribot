@@ -1414,3 +1414,25 @@ Sport,waldsaum,0,1,1,0,1,1,1,1,1,0,0,0,0
     pokemonName: 'Snubbull',
     date: new Date("2024-11-27"),
 });
+
+potluckData.set('delibird', {
+    csv: `
+Fast,theremuslupins,0,0,0,0,0,1,1,0,0,1,0,1,1,1,0
+Friend,Nicasia,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0
+Friend,TheWeirdSoul,0,0,0,0,0,1,1,0,0,0,0,0,1,1,0
+Heavy,cv,0,0,1,0,0,0,1,0,0,0,0,1,0,0,0
+Heavy,katsup,1,0,0,0,0,0,0,0,0,1,0,0,1,1,0
+Level,sachi,1,0,1,0,0,0,1,0,0,1,0,1,1,1,0
+Love,hal,0,0,1,0,0,1,0,0,0,1,0,0,1,1,0
+Lure,Rune,1,0,0,0,0,1,1,0,0,0,0,0,0,1,0
+Lure,waldsaum,0,0,1,0,0,0,0,0,0,1,0,0,1,0,0
+Moon,erin,1,0,0,0,0,1,1,0,0,0,0,0,1,1,0
+Dream,jang808,1,0,0,0,1,1,0,0,0,0,0,1,1,0,0
+Beast,Komezu,1,0,0,0,0,1,1,0,0,1,0,0,1,1,0
+Safari,161StreetBD4,1,0,1,0,0,1,1,0,0,1,0,1,0,0,0
+Sport,Eevee918,1,0,1,0,0,1,0,0,0,1,0,1,0,0,0
+Sport,Scrambled,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0
+`,
+    pokemonName: 'Delibird',
+    date: new Date("2024-12-04"),
+});
