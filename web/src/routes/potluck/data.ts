@@ -1436,3 +1436,25 @@ Sport,Scrambled,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0
     pokemonName: 'Delibird',
     date: new Date("2024-12-04"),
 });
+
+potluckData.set('cubchoo', {
+    csv: `
+Fast,Eevee918,0,1,0,0,1,0,1,0,1,1,1,1,0,0,1
+Friend,theremuslupins,1,0,1,0,1,0,1,0,1,1,1,1,0,0,0
+Heavy,FreckleSketches,0,1,0,0,0,0,0,0,1,1,1,1,0,0,0
+Heavy,Rune,1,0,0,0,1,0,1,0,0,0,0,0,1,0,1
+Level,sachi,1,1,0,0,0,0,1,0,1,1,1,0,0,0,1
+Level,Scrambled,0,0,1,0,0,0,0,0,0,0,0,1,0,0,0
+Love,161StreetBD4,1,1,0,0,1,0,0,0,1,1,0,1,0,0,1
+Love,katsup,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0
+Lure,Komezu,1,1,1,0,1,0,1,0,0,1,1,1,0,0,1
+Moon,Ame,1,1,1,0,1,0,1,0,1,0,0,1,0,0,0
+Dream,erin,0,1,1,0,1,0,0,0,1,1,0,1,0,0,1
+Beast,jang808,11,1,1,0,0,0,1,0,1,1,0,0,0,0,1
+Safari,cv,0,0,0,0,1,0,0,0,0,1,0,1,0,0,1
+Safari,waldsaum,0,1,0,0,0,0,1,0,1,0,1,0,0,0,0
+Sport,TheWeirdSoul,0,1,0,0,1,0,1,0,1,1,1,1,0,0,0
+`,
+    pokemonName: 'Cubchoo',
+    date: new Date("2024-12-11"),
+});
