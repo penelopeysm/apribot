@@ -1483,3 +1483,25 @@ Sport,Pingwin,0,1,0,0,1,0,0,0,1,1,0,0,0,0,0,0,0,0
     pokemonName: 'Cryogonal',
     date: new Date("2024-12-18"),
 });
+
+potluckData.set('fomantis', {
+    csv: `
+Beast,hal,0,1,0,1,1,0,0,0,0,0,1,1,1,0,0
+Dream,jang808,1,0,0,1,1,0,0,0,0,0,1,0,1,0,1
+Fast,FreckleSketches,0,0,0,0,1,0,0,0,0,0,0,0,1,0,1
+Fast,TacitusVikram,1,1,0,0,0,0,0,1,0,0,1,1,0,0,0
+Friend,theremuslupins,0,0,0,0,0,0,0,0,0,0,0,1,1,0,1
+Heavy,Rune,1,1,0,1,1,0,0,1,0,0,0,0,0,0,0
+Heavy,Nicasia,0,0,0,0,0,0,0,0,0,0,1,1,1,0,1
+Level,coldsnapper1995,1,1,0,1,1,0,0,0,0,0,1,1,1,0,1
+Love,Scrambled,0,1,0,1,0,0,0,0,0,0,0,1,1,0,1
+Lure,cv,0,0,0,0,1,0,0,0,0,0,0,1,1,0,0
+Lure,Komezu,1,1,0,1,0,0,0,1,0,0,0,0,0,0,0
+Moon,Eevee918,0,1,0,1,1,0,0,0,0,0,1,0,1,0,0
+Safari,DaGalaxyEevee,1,0,0,1,0,0,0,0,0,0,1,0,0,0,1
+Sport,waldsaum,1,1,0,1,0,0,0,0,0,0,0,0,0,0,0
+Sport,sachi,0,0,0,0,1,0,0,1,0,0,1,0,1,0,0
+`,
+    pokemonName: 'Fomantis',
+    date: new Date("2025-01-15"),
+});
