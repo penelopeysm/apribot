@@ -1051,40 +1051,45 @@ makeThread m = withContext "makeThread" $ do
 
 closeThread :: Message -> App DiscordHandler ()
 closeThread m = withContext "closeThread" $ do
-  cfg <- ask
   let channelId = messageChannelId m
   eitherChannel <- lift $ restCall $ DR.GetChannel channelId
   case eitherChannel of
     Left err -> do
       tellError err
       replyTo m Nothing "Could not get info about the channel you replied in."
-    Right chn@(ChannelPublicThread {}) -> do
-      eitherFirstMsg <- lift $ restCall $ DR.GetChannelMessages channelId (1, DR.AfterMessage (mkId 0))
-      case eitherFirstMsg of
-        Right [firstMsg] -> do
-          -- cfgDiscordId has the same value but wrong type for this
-          -- comparison
-          let threadCreatorId = userId (messageAuthor firstMsg)
-          let closerId = userId (messageAuthor m)
-          when
-            -- Case 1: ApriBot spun out a thread for a user
-            ( ( threadCreatorId == (DiscordId . unId) (cfgDiscordId cfg)
-                  && ("Original post by <@" <> tshow closerId <> ">:") `T.isPrefixOf` messageContent firstMsg
-              )
-                || (threadCreatorId == closerId) -- Case 2: the user made the thread themselves
-            )
-            $ do
-              replyTo m Nothing "Closing and locking thread now; please ping a moderator if you need it reopened!"
-              restCall_ $
-                DR.ModifyChannel channelId $
-                  def
-                    { DR.modifyChannelName = Just $ truncateThreadTitle $ "[Closed] " <> fromMaybe "" (channelThreadName chn),
-                      DR.modifyChannelThreadArchived = Just True,
-                      DR.modifyChannelThreadLocked = Just True
-                    }
-        _ -> replyTo m Nothing "Could not get the first message in the channel."
+    Right chn@(ChannelPublicThread {}) -> _closeThread m chn
+    Right chn@(ChannelPrivateThread {}) -> _closeThread m chn
     Right _ ->
       pure ()
+
+_closeThread :: Message -> Channel -> App DiscordHandler ()
+_closeThread m chn = withContext "_closeThread" $ do
+  cfg <- ask
+  eitherFirstMsg <- lift $ restCall $ DR.GetChannelMessages (channelId chn) (1, DR.AfterMessage (mkId 0))
+  case eitherFirstMsg of
+    Right [firstMsg] -> do
+      -- cfgDiscordId has the same value but wrong type for this
+      -- comparison
+      let threadCreatorId = userId (messageAuthor firstMsg)
+      let closerId = userId (messageAuthor m)
+      replyTo m Nothing $ "Thread creator: " <> tshow threadCreatorId <> ", closer: " <> tshow closerId
+      when
+        -- Case 1: ApriBot spun out a thread for a user
+        ( ( threadCreatorId == (DiscordId . unId) (cfgDiscordId cfg)
+              && ("Original post by <@" <> tshow closerId <> ">:") `T.isPrefixOf` messageContent firstMsg
+          )
+            || (threadCreatorId == closerId) -- Case 2: the user made the thread themselves
+        )
+        $ do
+          replyTo m Nothing "Closing and locking thread now; please ping a moderator if you need it reopened!"
+          restCall_ $
+            DR.ModifyChannel (channelId chn) $
+              def
+                { DR.modifyChannelName = Just $ truncateThreadTitle $ "[Closed] " <> fromMaybe "" (channelThreadName chn),
+                  DR.modifyChannelThreadArchived = Just True,
+                  DR.modifyChannelThreadLocked = Just True
+                }
+    _ -> replyTo m Nothing "Could not get the first message in the channel."
 
 respondHelp :: Message -> App DiscordHandler ()
 respondHelp m = withContext "respondHelp" $ do
@@ -1205,8 +1210,12 @@ restCall_ :: (Request (r a), FromJSON a) => r a -> App (ReaderT DiscordHandle IO
 restCall_ req = do
   resp <- lift $ restCall req
   case resp of
-    Left e -> tellError e
-    Right _ -> pure ()
+    Left e -> do
+      atomically $ T.putStrLn $ tshow e
+      tellError e
+    Right _ -> do
+      atomically $ T.putStrLn "succeeded"
+      pure ()
 
 replyTo :: Message -> Maybe [UserId] -> Text -> App DiscordHandler ()
 replyTo m allowedMentions txt =
