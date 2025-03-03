@@ -23,8 +23,7 @@ COPY ./hs/cabal.project.freeze .
 
 # Set up Haskell: see https://stackoverflow.com/a/71513191
 RUN curl https://downloads.haskell.org/~ghcup/x86_64-linux-ghcup > /usr/bin/ghcup && chmod +x /usr/bin/ghcup
-# discord-haskell doesn't work with GHC 9.6, so we stick to 9.4
-RUN ghcup -v install ghc --isolate /usr/local --force 9.4.5 && ghcup -v install cabal --isolate /usr/local/bin --force 3.6.2.0
+RUN ghcup -v install ghc --isolate /usr/local --force 9.8.2 && ghcup -v install cabal --isolate /usr/local/bin --force 3.12.1.0
 # This line circumvents a spurious error with cabal.project's git submodule.
 # It should go away if I ever upload reddit-oauth2 to Hackage
 RUN git config --global --add safe.directory '*'
