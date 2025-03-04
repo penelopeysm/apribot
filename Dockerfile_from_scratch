@@ -2,7 +2,7 @@
 # we need to run the web app (and manage it over SSH).
 #
 # Usage:
-#   docker build . -f Dockerfile_from_scratch -t penelopeysm/apribot && docker push penelopeysm/apribot
+#   docker build . -f Dockerfile_from_scratch -t penelopeysm/apribot --platform linux/x86_64 && docker push penelopeysm/apribot
 #
 # After this is done, the main Dockerfile will just pull from this pre-built
 # image, meaning that we don't have to re-build the dependencies every time we
