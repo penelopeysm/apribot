@@ -1072,7 +1072,6 @@ _closeThread m chn = withContext "_closeThread" $ do
       -- comparison
       let threadCreatorId = userId (messageAuthor firstMsg)
       let closerId = userId (messageAuthor m)
-      replyTo m Nothing $ "Thread creator: " <> tshow threadCreatorId <> ", closer: " <> tshow closerId
       when
         -- Case 1: ApriBot spun out a thread for a user
         ( ( threadCreatorId == (DiscordId . unId) (cfgDiscordId cfg)
@@ -1213,9 +1212,7 @@ restCall_ req = do
     Left e -> do
       atomically $ T.putStrLn $ tshow e
       tellError e
-    Right _ -> do
-      atomically $ T.putStrLn "succeeded"
-      pure ()
+    Right _ -> pure ()
 
 replyTo :: Message -> Maybe [UserId] -> Text -> App DiscordHandler ()
 replyTo m allowedMentions txt =
