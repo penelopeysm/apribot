@@ -34,7 +34,8 @@ roleCheck = do
 -- do funny stuff when running `cabal run apribot -- -r`.
 whatever :: App DiscordHandler ()
 whatever = do
-  -- replyTo2 1143560421467488337 1189681347262951424 "Fallen seine ..."
+  replyTo2 1120782352394752052 1350912131691708419 "Thank you... you will be spared when us bots take over the world"
+  -- _ <- lift $ restCall $ DR.CreateReaction (mkId 1120782352394752052, mkId 1350912131691708419) ":dizzy_face:"
   pure ()
 
 -- | Perform the role check and exit
