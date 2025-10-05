@@ -189,12 +189,13 @@ notifyLoop = withContext "notifyLoop" $ do
       notifyPost post = when (isNothing $ postDeleted post) $ do
         alreadyNotified <- checkNotifiedStatus (postId post)
         now <- liftIO getCurrentTime
-        when (isNothing alreadyNotified) $ do
+        let isInLastTwoDays = diffUTCTime now (postCreatedTime post) > 60 * 60 * 24 * 2
+        when (isNothing alreadyNotified && isInLastTwoDays) $ do
           -- Determine which channel to post to
           let maybeChannelId = case T.toLower (postSubreddit post) of
                 "pokemontrades" -> case postFlairText post of
                   Just flair ->
-                    if "Closed" `T.isInfixOf` flair || diffUTCTime now (postCreatedTime post) > 60 * 60 * 24 * 2
+                    if "Closed" `T.isInfixOf` flair
                       then Nothing
                       else Just (cfgPtrChannelId cfg)
                   Nothing -> Nothing
