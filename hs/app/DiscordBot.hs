@@ -1267,6 +1267,7 @@ makeMessageDetails post =
         Just f -> " [" <> f <> "] " <> cleanRedditMarkdown (postTitle post)
       truncatedTitle = if T.length title > maxTitleLength then T.take (maxTitleLength - 3) title <> "..." else title
       embedColor = case (flair, T.toLower (postSubreddit post)) of
+        (Just "PLZA", "pokemontrades") -> DiscordColorRGB 52 203 175
         (Just "SV", "pokemontrades") -> DiscordColorRGB 122 53 55
         (Just "SV", "bankballexchange") -> DiscordColorRGB 216 46 50
         (Just "SWSH", "pokemontrades") -> DiscordColorRGB 133 77 192
