@@ -189,7 +189,7 @@ notifyLoop = withContext "notifyLoop" $ do
       notifyPost post = when (isNothing $ postDeleted post) $ do
         alreadyNotified <- checkNotifiedStatus (postId post)
         now <- liftIO getCurrentTime
-        let isInLastTwoDays = diffUTCTime now (postCreatedTime post) > 60 * 60 * 24 * 2
+        let isInLastTwoDays = diffUTCTime now (postCreatedTime post) < 60 * 60 * 24 * 2
         when (isNothing alreadyNotified && isInLastTwoDays) $ do
           -- Determine which channel to post to
           let maybeChannelId = case T.toLower (postSubreddit post) of
