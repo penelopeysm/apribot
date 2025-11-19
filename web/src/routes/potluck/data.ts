@@ -1607,3 +1607,46 @@ Sport,TheWeirdSoul,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0
     pokemonName: 'Varoom',
     date: new Date("2025-09-17"),
 });
+
+potluckData.set('magikarp', {
+    csv: `
+Fast,danny50,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,1,0
+Fast,theremuslupins,0,0,0,1,0,0,1,0,0,0,0,0,0,0,1,0,0
+Friend,clinging2thecross,1,0,0,1,0,0,0,0,0,0,0,0,0,0,1,1,1
+Heavy,Kalvi,0,1,1,0,0,0,1,0,0,0,0,1,0,0,0,0,0
+Heavy,mel,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0
+Level,jang808,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,1,0
+Level,Komezu,0,1,0,0,0,0,0,0,0,0,0,1,0,0,1,0,0
+Love,cv,1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1
+Love,taurospuff,0,0,1,1,0,0,0,0,0,0,0,1,0,0,1,0,0
+Love,waldsaum,0,1,0,0,1,0,0,0,0,0,0,0,0,0,0,1,0
+Lure,Rune,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0
+Moon,Contextmedaddy,1,0,1,0,0,0,1,0,0,0,0,0,0,0,1,1,0
+Dream,Rune,1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0
+Beast,Rune,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+Safari,TheWeirdSoul,0,0,1,0,1,0,1,0,0,0,0,1,0,0,0,0,0
+Sport,Eevee918,0,0,0,0,1,0,0,0,1,0,0,0,0,0,1,0,0
+Sport,hal,0,0,1,1,0,0,1,0,0,0,0,0,0,0,0,0,0
+`,
+    pokemonName: 'Magikarp',
+    date: new Date("2025-10-22"),
+});
+
+potluckData.set('cleffa', {
+    csv: `
+Beast,clinging2thecross,0,0,0,0,1,0,0,0,0,1,1,1
+Dream,TheWeirdSoul,1,0,0,0,0,1,0,0,0,1,1,0
+Fast,jang808,1,1,0,0,0,1,0,0,0,1,1,1
+Friend,Eevee918,1,1,0,0,1,0,0,0,0,1,1,1
+Heavy,Kalvi,1,1,0,0,0,0,1,0,0,1,1,1
+Level,theremuslupins,1,1,1,0,1,0,1,0,0,1,0,1
+Love,Komezu,1,0,0,0,0,0,0,0,0,1,1,0
+Lure,Rune,0,1,0,0,1,0,0,0,0,0,1,0
+Lure,taurospuff,1,0,0,0,0,1,0,0,0,1,0,1
+Moon,danny50,0,1,0,0,0,1,0,0,0,0,1,0
+Safari,mel,1,1,1,0,0,1,1,0,0,1,0,0
+Sport,sachi,1,1,1,0,0,1,0,0,1,1,1,0
+`,
+    pokemonName: 'Cleffa',
+    date: new Date("2025-11-19"),
+});
