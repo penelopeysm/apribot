@@ -1650,3 +1650,21 @@ Sport,sachi,1,1,1,0,0,1,0,0,1,1,1,0
     pokemonName: 'Cleffa',
     date: new Date("2025-11-19"),
 });
+
+potluckData.set('chikorita', {
+    csv: `
+Beast,theremuslupins,0,0,0,0,0,1,0,0,0,1,0
+Dream,Eevee918,0,0,0,0,0,0,0,0,1,0,0
+Fast,Eevee918,1,0,0,0,0,1,1,0,0,0,0
+Fast,sachi,0,0,0,0,1,0,0,0,1,1,0
+Heavy,clinging2thecross,0,0,0,0,0,1,1,0,0,1,0
+Level,danny50,0,0,0,0,1,0,1,0,1,0,0
+Love,taurospuff,0,0,0,0,0,1,0,0,1,1,0
+Lure,Contextmedaddy,0,0,0,1,1,0,1,0,0,0,0
+Moon,161StreetBD4,0,0,0,0,1,1,1,0,0,1,0
+Safari,mel,0,0,0,1,1,0,1,0,1,0,0
+Sport,waldsaum,0,0,0,0,1,0,1,0,0,0,0
+`,
+    pokemonName: 'Chikorita',
+    date: new Date("2025-11-26"),
+});
