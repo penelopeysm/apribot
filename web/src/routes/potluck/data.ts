@@ -1668,3 +1668,24 @@ Sport,waldsaum,0,0,0,0,1,0,1,0,0,0,0
     pokemonName: 'Chikorita',
     date: new Date("2025-11-26"),
 });
+
+potluckData.set('dedenne', {
+    csv: `
+Beast,jang808,0,1,1,1,1,1,1,0,0,0,1,0,0,0
+Dream,taurospuff,1,0,1,1,1,1,0,0,1,0,1,0,0,0
+Fast,Komezu,1,1,0,1,1,1,0,0,1,0,1,0,0,1
+Friend,theremuslupins,1,1,0,0,1,0,0,0,0,0,1,0,0,1
+Heavy,mel,1,1,1,1,0,1,1,0,1,0,1,0,0,1
+Level,danny50,1,1,1,1,1,0,1,0,0,0,1,0,0,0
+Love,Kalvi,1,0,0,0,1,0,0,0,1,0,1,0,0,0
+Love,katsup,0,1,1,1,0,0,0,0,0,0,0,0,0,0
+Lure,sachi,0,1,0,0,0,0,1,0,0,0,0,0,0,0
+Lure,waldsaum,1,0,0,1,0,0,0,0,0,0,1,0,0,0
+Moon,clinging2thecross,1,1,1,1,1,1,1,0,0,0,0,0,0,1
+Safari,Eevee918,0,1,0,1,1,0,1,0,0,0,0,0,0,0
+Safari,Rune,1,0,1,0,0,0,0,0,1,0,1,0,0,0
+Sport,TheWeirdSoul,1,1,1,1,1,0,0,0,0,0,1,0,0,0
+`,
+    pokemonName: 'Dedenne',
+    date: new Date("2025-12-17"),
+});
