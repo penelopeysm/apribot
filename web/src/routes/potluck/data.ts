@@ -1689,3 +1689,21 @@ Sport,TheWeirdSoul,1,1,1,1,1,0,0,0,0,0,1,0,0,0
     pokemonName: 'Dedenne',
     date: new Date("2025-12-17"),
 });
+
+potluckData.set('greavard', {
+    csv: `
+Fast,Rune,0,1,0,1,0,0,0,1,0,0,0
+Friend,danny50,0,0,0,1,1,0,0,1,0,0,1
+Heavy,sachi,0,1,0,1,1,0,0,1,0,1,0
+Level,mel,0,1,0,0,1,0,0,1,0,0,1
+Love,clinging2thecross,0,1,0,1,0,0,0,1,0,0,1
+Lure,waldsaum1,0,1,0,1,1,0,0,1,0,0,0
+Moon,Rune,0,1,0,0,0,0,0,0,0,1,0
+Dream,taurospuff,0,1,0,1,1,0,0,0,0,1,1
+Beast,jang808,0,0,1,0,1,0,0,1,0,0,1
+Safari,Kalvi,0,1,0,1,1,0,0,1,0,0,0
+Sport,hal,0,1,1,1,1,0,0,1,0,1,0
+`,
+    pokemonName: 'Greavard',
+    date: new Date("2026-02-18"),
+});
