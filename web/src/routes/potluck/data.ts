@@ -1707,3 +1707,46 @@ Sport,hal,0,1,1,1,1,0,0,1,0,1,0
     pokemonName: 'Greavard',
     date: new Date("2026-02-18"),
 });
+
+potluckData.set('cetoddle', {
+    csv: `
+Fast,hal,0,0,0,0,0,0,1,1,0,1,0,0,0,0,0
+Fast,Rune,0,0,1,0,0,1,0,0,0,0,0,0,0,1,0
+Friend,danny50,0,0,0,0,0,1,1,1,0,1,0,0,0,1,0
+Heavy,waldsaum,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0
+Level,clinging2thecross,0,0,0,0,0,0,1,0,0,0,0,0,0,1,0
+Level,mel,0,0,1,0,0,0,0,1,0,1,0,0,0,0,0
+Love,sachi,1,0,1,0,1,1,0,1,0,1,0,0,0,0,0
+Lure,161StreetBD4,1,0,1,0,0,1,1,0,0,1,0,0,0,1,0
+Moon,waldsaum,0,0,0,0,1,1,1,0,0,0,0,0,0,1,0
+Dream,taurospuff,1,0,1,0,0,1,1,1,0,0,0,0,0,0,0
+Beast,Rune,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0
+Safari,jang808,0,0,1,0,1,0,1,0,0,1,0,0,0,0,0
+Safari,TheWeirdSoul,1,0,0,0,0,1,0,1,0,0,0,0,0,0,0
+Sport,Eevee918,0,0,1,0,1,0,0,1,0,1,0,0,0,0,0
+Sport,Lyudmila1996,0,0,0,0,0,1,1,0,0,0,0,1,0,0,0
+`,
+    pokemonName: 'Cetoddle',
+    date: new Date("2026-04-08"),
+});
+
+potluckData.set('veluza', {
+    csv: `
+Fast,Lyudmila1996,0,0,1,0,0,0,0,1,0,0,0,1,0,1
+Fast,waldsaum,0,0,0,0,0,0,0,0,0,1,1,0,1,0
+Friend,Silver,0,0,0,0,0,0,0,0,0,1,1,1,1,0
+Heavy,danny50,0,0,0,0,0,0,0,1,0,1,0,1,1,0
+Heavy,jang808,0,0,1,0,0,0,0,0,0,0,1,0,0,1
+Level,Rune,0,0,1,0,0,0,0,0,0,0,0,1,1,1
+Level,TheWeirdSoul,0,0,0,0,0,0,0,1,0,1,1,0,0,0
+Love,Kalvi,0,0,1,0,0,0,0,0,0,1,1,1,1,1
+Lure,Eevee918,0,0,1,0,0,0,0,1,0,1,1,0,0,0
+Moon,161StreetBD4,0,0,1,0,0,0,0,1,0,0,1,0,1,1
+Dream,taurospuff,0,0,1,0,0,0,0,0,0,1,0,0,1,0
+Beast,clinging2thecross,0,0,1,0,0,0,0,1,0,1,1,0,0,1
+Safari,mel,0,0,1,0,0,0,0,0,0,1,1,1,0,0
+Sport,hal,0,0,1,0,0,0,0,1,0,1,1,1,1,0
+`,
+    pokemonName: 'Veluza',
+    date: new Date("2026-05-20"),
+});
