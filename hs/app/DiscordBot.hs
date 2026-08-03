@@ -1092,25 +1092,26 @@ respondHelp :: Message -> App DiscordHandler ()
 respondHelp m = withContext "respondHelp" $ do
   votesChan <- asks cfgPotluckVotesChannelId
   signupChan <- asks cfgPotluckSignupChannelId
+  tradeOverflowChan <- asks cfgTradeOverflowChannelId
   replyTo m Nothing $
     T.intercalate
       "\n"
       [ "**General commands**",
         "- `!help`",
         "  Show this message.",
-        "- `!info {pokemon1} [{pokemon2} ...]`",
+        "- `!info {pokemon1} {pokemon2} ...`",
         "  Show an overview of a Pokémon, including stats, moves, and abilities.",
-        "- `!ha {pokemon}`",
+        "- `!ha {pokemon1} {pokemon2} ...`",
         "  Show the hidden ability of a Pokémon",
-        "- `!em {game} {pokemon}`",
+        "- `!em {game} {pokemon1} {pokemon2} ...`",
         "  Show egg moves for a Pokémon in a game. `{game}` can be `usum`, `bdsp`, `swsh`, or `sv`.",
-        "- `!emp {game} {pokemon}`",
+        "- `!emp {game} {pokemon1} {pokemon2} ...`",
         "  Same as `!em`, but also show potential parents.",
-        "- `!legality {pokemon}`",
+        "- `!legality {pokemon1} {pokemon2} ...`",
         "  Show ball legality for a Pokémon across all available games.",
-        "- `!nature {pokemon}`",
+        "- `!nature {pokemon1} {pokemon2} ...`",
         "  Show suggested natures for a Pokémon (collated from a couple of spreadsheets).",
-        "- `!sprite {pokemon}`",
+        "- `!sprite {pokemon1} {pokemon2} ...`",
         "  Show regular and shiny sprites for a Pokémon.",
         "- `!potluck1`",
         "  Show a summary of the proposals in <#" <> tshow votesChan <> ">.",
@@ -1118,9 +1119,9 @@ respondHelp m = withContext "respondHelp" $ do
         "  Show a summary of reactions to the most recent post in <#" <> tshow signupChan <> ">.",
         "**Trading commands**",
         "- `!thread`",
-        "  Reply to your trading partner in the trading forums with this to create a new thread in #thread-archive",
+        "  Reply to your trading partner in the trading forums with this to create a new thread in <#" <> tshow tradeOverflowChan <> ">.",
         "- `!close`",
-        "  Close your trading post, or a thread you created"
+        "  Close your trading post, or a thread you created."
       ]
 
 ballRoles :: Map Text RoleId
