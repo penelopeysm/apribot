@@ -18,3 +18,25 @@ The codebase comprises several parts:
  - Finally, there is a PostgreSQL database which threads everything together.
 
 ApriBot is currently hosted on [Fly.io](https://fly.io).
+
+# Prerequisites
+
+The Haskell app needs a few binary dependencies.
+The following should probably suffice:
+
+```
+brew install zlib pkg-config postgresql
+```
+
+To run locally, you'll also need a bunch of environment variables.
+These aren't described here, except to note that I should have them stored somewhere on my computer...
+
+Then:
+
+- `make hs`: Runs the full Haskell app. If you're testing the Reddit scraping or Discord bot, you'll need this.
+
+- `make a`: Runs the Haskell app but only the web backend. If you're only testing the web components, then this suffices.
+
+- `make b`: Launches the frontend.
+
+- `make c`: Opens a proxy to the `apripsql` database on Fly.io. You could in principle host the database locally, but you'll need to check the `apripsql` repository for that.

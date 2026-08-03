@@ -1,3 +1,5 @@
+.PHONY: hs a b c
+
 hs:
 	cd hs && cabal run
 

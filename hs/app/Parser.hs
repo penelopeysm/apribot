@@ -6,6 +6,7 @@ module Parser
 where
 
 import Control.Monad (void)
+import Data.Char (isSpace)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Void
@@ -29,13 +30,13 @@ data DiscordCommand
   | PotluckVotes
   | PotluckSignup
   | Sandwich
-  | HA (Maybe Text)
-  | EM (Maybe Game) (Maybe Text)
-  | EMParents (Maybe Game) (Maybe Text)
-  | Nature (Maybe Text)
-  | Legality (Maybe Text)
-  | Sprite (Maybe Text)
-  | Info (Maybe Text)
+  | HA [Text]
+  | EM (Maybe Game) [Text]
+  | EMParents (Maybe Game) [Text]
+  | Nature [Text]
+  | Legality [Text]
+  | Sprite [Text]
+  | Info [Text]
   deriving (Eq, Show)
 
 help :: Parser DiscordCommand
@@ -56,22 +57,18 @@ potluck2 = PotluckSignup <$ C.string' "!potluck2"
 sandwich :: Parser DiscordCommand
 sandwich = Sandwich <$ C.string' "!sandwich"
 
--- This consumes the rest of the input, and also removes trailing whitespace
-parsePkmnName :: Parser Text
-parsePkmnName = T.stripEnd <$> takeWhile1P Nothing (const True)
-
--- Helper function
-spTry :: Parser a -> Parser (Maybe a)
-spTry p = optional $ try (C.space1 *> p)
+-- This parses a list of words separated by whitespace
+parseWords :: Parser [Text]
+parseWords = map T.stripEnd <$> many (C.space1 *> takeWhile1P Nothing (not . isSpace))
 
 ha :: Parser DiscordCommand
-ha = HA <$> (C.string' "!ha" *> spTry parsePkmnName)
+ha = HA <$> (C.string' "!ha" *> parseWords)
 
 nature :: Parser DiscordCommand
-nature = Nature <$> (C.string' "!nature" *> spTry parsePkmnName)
+nature = Nature <$> (C.string' "!nature" *> parseWords)
 
 legality :: Parser DiscordCommand
-legality = Legality <$> (C.string' "!legality" *> spTry parsePkmnName)
+legality = Legality <$> (C.string' "!legality" *> parseWords)
 
 parseGame :: Parser Game
 parseGame =
@@ -82,29 +79,29 @@ parseGame =
       SV <$ C.string' "sv"
     ]
 
-parseGameAndPkmn :: Parser (Maybe Game, Maybe Text)
+parseGameAndPkmn :: Parser (Maybe Game, [Text])
 parseGameAndPkmn = do
   game <- optional (C.space1 *> parseGame) -- don't backtrack on this one
-  pkmnName <- spTry parsePkmnName
-  pure (game, pkmnName)
+  pkmnNames <- parseWords
+  pure (game, pkmnNames)
 
 em :: Parser DiscordCommand
 em = do
   void $ C.string' "!em"
-  (game, pkmnName) <- parseGameAndPkmn
-  pure $ EM game pkmnName
+  (game, pkmnNames) <- parseGameAndPkmn
+  pure $ EM game pkmnNames
 
 emParents :: Parser DiscordCommand
 emParents = do
   void $ C.string' "!emp"
-  (game, pkmnName) <- parseGameAndPkmn
-  pure $ EMParents game pkmnName
+  (game, pkmnNames) <- parseGameAndPkmn
+  pure $ EMParents game pkmnNames
 
 sprite :: Parser DiscordCommand
-sprite = Sprite <$> (C.string' "!sprite" *> spTry parsePkmnName)
+sprite = Sprite <$> (C.string' "!sprite" *> parseWords)
 
 info :: Parser DiscordCommand
-info = Info <$> (C.string' "!info" *> spTry parsePkmnName)
+info = Info <$> (C.string' "!info" *> parseWords)
 
 parser :: Parser DiscordCommand
 parser = do
